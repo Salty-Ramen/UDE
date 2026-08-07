@@ -1,2 +1,15 @@
 * Testing UDEs on sparse murine data
 Working towards a manuscript
+** Version control conundrum
+I am still struggling with what the best way to describe, write and save an
+experiment is. Experiments as folders is the simplest idea of them all—each non
+minor change is deemed to be an experiment and therefore gets a separate folder;
+however, it comes with the obvious downside of massive, hard to navigate project
+directories with many experiments. Experiments as git branches is another fun
+idea. I have a feeling that the transient nature of branches will have a
+problematic consequence to results storage, since we need to look at results
+simultaneosly in most cases. Perhaps the best compromise is by using experiments
+as folders; but this time, the experiment is a notebook file. This ensures that
+each sub-experiment—think ablation studies—are stored without being subject to
+the whims of branches while maintaining a sane level of organization and
+reproducibility for the end user.
