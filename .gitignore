@@ -1,0 +1,18 @@
+# For julia
+
+*.jl.cov
+*.jl.mem
+
+/docs/build
+# Generated data/Results
+*.csv
+*.jld2
+# Large sample datasets
+*.h5
+*.hdf5
+
+# Generated plots
+*.pdf
+
+
+
