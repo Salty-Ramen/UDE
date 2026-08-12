@@ -1,6 +1,15 @@
 * Testing UDEs on sparse murine data
 Working towards a manuscript
-** Version control conundrum
+
+The repository is currently structured as primarily experiment focused. Might
+change when the project nears publication.
+** Commit message conventions
+These are the conventions I hope to follow.
+
+#+begin_src
+<type>(<scope>)
+#+end_src
+** Version control and organization conundrum
 I am still struggling with what the best way to describe, write and save an
 experiment is. Experiments as folders is the simplest idea of them all—each non
 minor change is deemed to be an experiment and therefore gets a separate folder;
@@ -13,3 +22,11 @@ as folders; but this time, the experiment is a notebook file. This ensures that
 each sub-experiment—think ablation studies—are stored without being subject to
 the whims of branches while maintaining a sane level of organization and
 reproducibility for the end user.
+
+The notebook in question can be an org-mode file. Native emacs. However, I feel
+like a pluto.jl file might be more sensible for a broader audience. I am not
+sure about this one right now. Why am I hesitant about an org-mode file? The
+julia-vterm plumbing is fragile. I also have a tendency of adhering to out of
+sight = out of mind, so an org-mode file can be a bit awkward to work with
+compared to a conventional pluto.jl notebook. The good thing about pluto.jl is
+that I can edit it from emacs perhaps since it is a .jl file. Let's test that out.
