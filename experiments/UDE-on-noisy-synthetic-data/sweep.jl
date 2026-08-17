@@ -46,7 +46,7 @@ BLAS.set_num_threads(1)
 const BUDGET      = 120
 const ALLOCATIONS = [(40, 3), (20, 6), (10, 12), (5, 24), (4, 30)]   # (timepoints, mice); T*m == BUDGET
 const NOISE       = [0.0, 0.05, 0.10, 0.15, 0.20]
-const SEEDS       = 1
+const SEEDS       = 1:5
 
 for (T, m) in ALLOCATIONS
     @assert T * m == BUDGET "allocation ($T,$m) doesn't spend budget $BUDGET"
