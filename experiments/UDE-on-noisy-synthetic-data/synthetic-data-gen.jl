@@ -19,11 +19,9 @@
 #   dM   = g3 - d_m*M                      g3 = r_M_ifn*IFN
 # so the "known" params are (k, K, d_v, d_ifn, d_m); everything else is in g.
 # ============================================================================
-using DrWatson; @quickactivate "UDE"
-
 
 using OrdinaryDiffEq
-using Random, Statistics          # noise draws + per-state σ scale
+using Random                      # noise draws
 
 # All 12 true parameters + IC — single source of truth (Float64 for accuracy).
 const TRUE_PARAMS = (
@@ -48,6 +46,8 @@ function virus_ifn_rhs!(du, u, p, t)
 end
 
 # True missing terms (the grey-box split) evaluated on a 3×N state matrix.
+# On the true (positive) trajectory V^n is well defined; on predicted states with
+# a stray V<0 the non-integer power yields NaN, which downstream finite() guards.
 function true_g(X, p = TRUE_PARAMS)
     V, IFN, M = X[1, :], X[2, :], X[3, :]
     g1 = p.r_v_ifn .* IFN .+ p.r_v_M .* M
@@ -73,14 +73,15 @@ Return the Float32 data contract.
 
 Training set (what fit_ude sees): `timepoints` distinct sample times uniformly
 spaced on [0,8] (or the dense grid when `timepoints === nothing`), each replicated
-`mice_per_timepoint` times with an independent σ-scaled Gaussian draw when
-`noise_frac > 0`. Total mice = timepoints · mice_per_timepoint. fit_ude's
-`col_of_obs` already sums the loss over these replicates.
+`mice_per_timepoint` times with independent proportional (multiplicative)
+Gaussian noise, `y = x·(1 + noise_frac·ε)`, when `noise_frac > 0`. Total mice =
+timepoints · mice_per_timepoint. fit_ude's `col_of_obs` already sums the loss
+over these replicates.
 
 Diagnostics set (what `evaluate` scores against): a CLEAN dense grid
 (`0:dt:8`) — `Y_dense`/`f_true` are the noise-free ground truth, so state and
 missing-term rel-L2 measure error against truth rather than against the noisy
-samples. Per-state noise σ is the clean-trajectory std.
+samples.
 
 Defaults (`timepoints=nothing, mice_per_timepoint=1, noise_frac=0`) reproduce the
 original clean full-grid contract, so `t_train == t_dense` and `Y_train == Y_dense`.
@@ -114,9 +115,12 @@ function generate_data(; dt = 0.1, timepoints = nothing, mice_per_timepoint::Int
     t_tr = repeat(tu; inner = mice_per_timepoint)          # length T·m
     Ytr  = repeat(Xu; inner = (1, mice_per_timepoint))     # 3 × T·m clean
     if noise_frac > 0
-        s   = vec(std(Xd; dims = 2))                       # per-state scale
+        # Proportional (multiplicative) error: noise scales with the signal, so
+        # it vanishes as a state → 0 and can't push a non-negative state below 0
+        # (the additive-σ model did, near t=0 where V is small and IFN,M ≈ 0).
+        # States that are exactly 0 (IFN,M at t=0) stay exactly 0.
         rng = MersenneTwister(seed)
-        Ytr = Ytr .+ noise_frac .* s .* randn(rng, size(Ytr))
+        Ytr = Ytr .* (1.0 .+ noise_frac .* randn(rng, size(Ytr)))
     end
 
     return (t_train = permutedims(Float32.(t_tr)),   # 1 × (T·m)
@@ -141,4 +145,3 @@ let d = data
     @assert d.t_dense[1] == 0f0 && d.t_dense[end] == 8f0
     @info "data preflight passed" N V=extrema(d.Y_dense[1, :]) IFN=extrema(d.Y_dense[2, :]) M=extrema(d.Y_dense[3, :])
 end
-
