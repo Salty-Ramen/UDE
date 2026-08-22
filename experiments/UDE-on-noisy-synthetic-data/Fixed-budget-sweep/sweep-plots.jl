@@ -15,13 +15,16 @@ using DrWatson, JLD2, DataFrames, Statistics, CairoMakie, Pkg
 # at load time. It does NOT load the fitting stack and never refits — it just
 # activates the project (so Pkg.project().path below matches the sweep) and
 # defines solve_true. It is heavier than a bare `using`, but not a fit.
-include(joinpath(@__DIR__, "synthetic-data-gen.jl"))
+include(joinpath(@__DIR__, "../.", "synthetic-data-gen.jl"))
 
 # SWEEP_DIR: copied verbatim from sweep.jl. Resolves against the project that
 # the include just activated. (If you run this outside the UDE project, replace
 # with the absolute path string instead.)
 const SWEEP_DIR = joinpath(dirname(Pkg.project().path),
-                           "experiments", "UDE-on-noisy-synthetic-data", "Results", "sweep")
+                           "experiments",
+                           "UDE-on-noisy-synthetic-data",
+                           "Fixed-budget-sweep",
+                           "Results", "sweep")
 
 # PDFs go next to the other results (the Results/ dir that holds sweep/).
 const RESULTS_DIR = dirname(SWEEP_DIR)
@@ -54,25 +57,37 @@ const STATES    = ["V", "IFN", "M"]
 const STATE_ERR = (:rel_l2_V, :rel_l2_IFN, :rel_l2_M)
 # Allocations ordered by timepoints descending: 20×1, 10×2, 5×4, 4×5.
 allocs = sort(unique(df.alloc); by = a -> parse(Int, split(a, "×")[1]), rev = true)
+noises = sort(unique(df.noise_frac))     # ascending: 0.0, 0.05, 0.10
+seeds  = sort(unique(df.seed))
 
 # ── Plot 1: state error vs noise ────────────────────────────────────────────
 # Aggregation: y = MEAN over the (up to 3) seeds per (allocation, noise); seed
-# spread shown as a MIN–MAX band. Mean+min/max (not std) because n≤3 per point.
+# spread shown as a ±SEM band — see mean_sem.
+# Seed spread as mean ± SEM (std/√n). SEM over min–max: it reflects uncertainty
+# in the mean rather than the single worst/best seed. With n≤3 it's still coarse
+# (2-dof std, and rel-L2 is ≥0 / right-skewed so the symmetric band can dip <0);
+# a lone-seed group gets zero width.
+function mean_sem(v)
+    m = mean(v)
+    s = length(v) > 1 ? std(v) / sqrt(length(v)) : 0.0
+    (m, m - s, m + s)
+end
+
 function agg(sub, col)                       # sub = one allocation's rows
     ν  = sort(unique(sub.noise_frac))
-    m  = [mean(sub[sub.noise_frac .== v, col])    for v in ν]
-    lo = [minimum(sub[sub.noise_frac .== v, col]) for v in ν]
-    hi = [maximum(sub[sub.noise_frac .== v, col]) for v in ν]
-    (ν, m, lo, hi)
+    ms = [mean_sem(sub[sub.noise_frac .== v, col]) for v in ν]
+    (ν, first.(ms), getindex.(ms, 2), getindex.(ms, 3))
 end
 
 function plot_error_vs_noise(err_cols, glabels, fname, suptitle)
     colors = Makie.wong_colors()
-    fig = Figure(size = (560, 820))
+    fig = Figure(size = (680, 820))
+    ax1 = nothing
     for (i, lbl) in enumerate(glabels)
         ax = Makie.Axis(fig[i, 1]; xlabel = "noise fraction",
                         ylabel = "rel-L2 ($lbl)",
                         title = i == 1 ? suptitle : "")
+        i == 1 && (ax1 = ax)
         for (k, a) in enumerate(allocs)
             sub = df[df.alloc .== a, :]
             ν, m, lo, hi = agg(sub, err_cols[i])
@@ -80,8 +95,8 @@ function plot_error_vs_noise(err_cols, glabels, fname, suptitle)
             lines!(ax, ν, m; color = colors[k], label = a)
             scatter!(ax, ν, m; color = colors[k], markersize = 6)
         end
-        i == 1 && axislegend(ax; position = :lt, labelsize = 9)
     end
+    Legend(fig[1:length(glabels), 2], ax1; labelsize = 9)
     save(res_path(fname), fig)
     fig
 end
@@ -93,6 +108,39 @@ plot_error_vs_noise(STATE_ERR, STATES, "sweep_state_error_vs_noise.pdf",
 # this g figure is the other true-model-vs-UDE error, same layout.
 plot_error_vs_noise((:rel_l2_gV, :rel_l2_gIFN, :rel_l2_gM), ["g_V", "g_IFN", "g_M"],
                     "sweep_g_error_vs_noise.pdf", "missing-term error vs noise (UDE g vs true g)")
+
+# Alternative view with the axes flipped: x = sampling scheme (categorical), one
+# line per noise level (colour = noise). Same seed aggregation (mean ± SEM band).
+# Reads "at a given noise, how does error move as the fixed mouse budget is
+# reallocated across timepoints." x is categorical, so schemes sit at integer
+# positions 1:n with the allocation labels as ticks.
+function plot_error_vs_scheme(err_cols, glabels, fname, suptitle)
+    xs     = 1:length(allocs)
+    colors = Makie.wong_colors()
+    fig = Figure(size = (680, 820))
+    ax1 = nothing
+    for (i, lbl) in enumerate(glabels)
+        ax = Makie.Axis(fig[i, 1]; xlabel = "sampling scheme",
+                        ylabel = "rel-L2 ($lbl)",
+                        xticks = (collect(xs), allocs),
+                        title = i == 1 ? suptitle : "")
+        i == 1 && (ax1 = ax)
+        for (k, ν) in enumerate(noises)
+            ms = [mean_sem(df[(df.alloc .== a) .& (df.noise_frac .== ν), err_cols[i]])
+                  for a in allocs]
+            m, lo, hi = first.(ms), getindex.(ms, 2), getindex.(ms, 3)
+            band!(ax, xs, lo, hi; color = (colors[k], 0.15))
+            lines!(ax, xs, m; color = colors[k], label = "noise $(ν)")
+            scatter!(ax, xs, m; color = colors[k], markersize = 6)
+        end
+    end
+    Legend(fig[1:length(glabels), 2], ax1; labelsize = 9)
+    save(res_path(fname), fig)
+    fig
+end
+
+plot_error_vs_scheme(STATE_ERR, STATES, "sweep_state_error_vs_scheme.pdf",
+                     "state fit error vs sampling scheme")
 
 # ── Plot 2: true trajectory vs predictions, sectioned by sampling scheme ─────
 # Rows = states (V, IFN, M); columns = mouse allocation (timepoints×mice). Each
@@ -123,12 +171,15 @@ for (i, lbl) in enumerate(STATES), (j, a) in enumerate(allocs)
     end
     lines!(ax, tg, Xtrue[i, :]; color = :black, linewidth = 2.5,
            linestyle = :dot, label = "true")
-    i == 1 && j == 1 && axislegend(ax; position = :rt, labelsize = 8)
 end
 for i in 1:length(STATES)
     linkyaxes!(axs[i, :]...)
 end
-Colorbar(fig2[1:length(STATES), length(allocs) + 1]; colormap = cg,
+# Right column: "true" key stacked above the error colorbar (legend outside panels).
+Legend(fig2[1, length(allocs) + 1],
+       [LineElement(color = :black, linestyle = :dot, linewidth = 2)], ["true"];
+       labelsize = 8)
+Colorbar(fig2[2:length(STATES), length(allocs) + 1]; colormap = cg,
          colorrange = (emin, emax), label = "state rel-L2 vs true")
 save(res_path("sweep_pred_vs_true_by_scheme.pdf"), fig2)
 
@@ -147,9 +198,6 @@ samp = [generate_data(timepoints = Int(r.timepoints),
 df.t_samp = [vec(d.t_train) for d in samp]
 df.Y_samp = [d.Y_train      for d in samp]
 
-noises = sort(unique(df.noise_frac))
-seeds  = sort(unique(df.seed))
-
 # Each of the three sliceable dimensions → its dataframe column, sorted values,
 # panel/legend label, and filename tag.
 dim_col(d)     = d === :scheme ? :alloc  : d === :seed ? :seed      : :noise_frac
@@ -166,7 +214,7 @@ function partition_grid(; fig_by::Symbol, col_by::Symbol, color_by::Symbol)
 
     for fv in dim_vals(fig_by)
         figrows = df[df[!, fcol] .== fv, :]
-        fig = Figure(size = (250 * length(cvals) + 20, 780))
+        fig = Figure(size = (250 * length(cvals) + 140, 780))
         axs = Matrix{Makie.Axis}(undef, length(STATES), length(cvals))
         for (i, lbl) in enumerate(STATES), (j, cv) in enumerate(cvals)
             ax = Makie.Axis(fig[i, j];
@@ -191,13 +239,13 @@ function partition_grid(; fig_by::Symbol, col_by::Symbol, color_by::Symbol)
                   LineElement(color = :black, linestyle = :dot, linewidth = 2);
                   MarkerElement(color = :black, marker = :circle, markersize = 8)]
         labels = [[dim_label(color_by, v) for v in kvals]; "true"; "data"]
-        axislegend(axs[1, 1], elems, labels; position = :rt, labelsize = 8)
+        Legend(fig[1:length(STATES), length(cvals) + 1], elems, labels; labelsize = 8)
         save(res_path("sweep_fit_vs_data_$(dim_tag(fig_by, fv)).pdf"), fig)
     end
 end
 
 partition_grid(fig_by = :seed,   col_by = :scheme, color_by = :noise)
 partition_grid(fig_by = :noise,  col_by = :scheme, color_by = :seed)
-partition_grid(fig_by = :scheme, col_by = :noise,   color_by = :seed)
+partition_grid(fig_by = :scheme, col_by = :seed,   color_by = :noise)
 
 @info "plots written" dir = RESULTS_DIR
