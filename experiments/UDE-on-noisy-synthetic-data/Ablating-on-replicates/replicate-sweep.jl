@@ -23,7 +23,7 @@ include(joinpath(@__DIR__, "..", "sweep-runner.jl"))
 # ── Grid (edit here). (T, m-range): each T expands over its OWN replicate range,
 #    so this is a DEPENDENT comprehension (mrange depends on the outer T) — not
 #    dict_list, whose axes are independent. ────────────────────────────────────
-const ALLOCATIONS = [(20, 3:6), (10, 3:6), (15, 3:5)]   # (timepoints, mice range)
+const ALLOCATIONS = [(20, 3:6), (10, 3:6), (5, 3:6)]   # (timepoints, mice range)
 const NOISE       = [0.0, 0.05, 0.10, 0.15, 0.20]
 const SEEDS       = 1:5
 
