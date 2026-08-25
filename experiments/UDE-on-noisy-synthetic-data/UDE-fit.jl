@@ -75,7 +75,7 @@ Returns:
   contract       :: NamedTuple        trained model (for step-3 symbolic recovery)
   θ              :: trained parameters
 """
-function fit_and_eval(data; seed::Int = 5)
+function fit_and_eval(data; seed::Int = 5, λ::Real = 0)
     xmean = Float32.(vec(mean(data.Y_train; dims = 2)))
     xstd  = Float32.(vec(max.(std(data.Y_train; dims = 2), 1f-6)))
 
@@ -88,13 +88,13 @@ function fit_and_eval(data; seed::Int = 5)
 
     r1 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-2),
-                 maxiters = 1000, sensealg = SENSEALG, callback = _silent)
+                 maxiters = 1000, sensealg = SENSEALG, callback = _silent, λ = λ)
     r2 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-3),
-                 maxiters = 3000, θ_init = r1.θ, sensealg = SENSEALG, callback = _silent)
+                 maxiters = 3000, θ_init = r1.θ, sensealg = SENSEALG, callback = _silent, λ = λ)
     r3 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimJL.BFGS(initial_stepnorm = 1f-2),
-                 maxiters = 400, θ_init = r2.θ, sensealg = SENSEALG, callback = _silent)
+                 maxiters = 400, θ_init = r2.θ, sensealg = SENSEALG, callback = _silent, λ = λ)
 
     ev = evaluate(r3.contract, data)
     return (rel_l2_state   = ev.rel_l2_state,

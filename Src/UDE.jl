@@ -85,6 +85,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                  sensealg         = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)),
                  abstol::Float32  = 1f-6,
                  reltol::Float32  = 1f-6,
+                 λ::Real          = 0,
                  θ_init           = nothing)
 
     rng = MersenneTwister(seed)
@@ -123,6 +124,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
         sol = predict(θ, t_unique_row)          # n_states × n_unique
         Ŷ   = sol[:, col_of_obs]                # n_states × Nobs  (scattered back)
         Statistics.mean(abs2, (Ŷ .- data.Y_train) ./ σ_state)
+        λ == 0 ? data_term : data_term + λ * sum(abs2, θ)
     end
     
 

@@ -32,7 +32,7 @@ function run_cell(c)
                          mice_per_timepoint = c["mice_per_timepoint"],
                          noise_frac         = c["noise_frac"],
                          seed               = c["seed"])
-    r = fit_and_eval(data; seed = c["seed"])
+    r = fit_and_eval(data; seed = c["seed"], λ = get(c, "lambda", 0.0))
     X_sr = Float32.(r.contract.predict_state_raw(TG))   # 3×200 predicted states
     g_sr = Float32.(r.contract.predict_g_raw(TG))       # 3×200 learned g
     f_sr = Float32.(true_g(Float64.(X_sr)))             # 3×200 true g on those states
