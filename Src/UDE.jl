@@ -123,7 +123,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
     function loss(θ, _)
         sol = predict(θ, t_unique_row)          # n_states × n_unique
         Ŷ   = sol[:, col_of_obs]                # n_states × Nobs  (scattered back)
-        Statistics.mean(abs2, (Ŷ .- data.Y_train) ./ σ_state)
+        data_term = Statistics.mean(abs2, (Ŷ .- data.Y_train) ./ σ_state)
         λ == 0 ? data_term : data_term + λ * sum(abs2, θ)
     end
     
