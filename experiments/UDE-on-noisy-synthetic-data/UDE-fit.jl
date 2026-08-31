@@ -93,16 +93,24 @@ function fit_and_eval(data; seed::Int = 5, λ::Real = 0)
     #     Lux.WrappedFunction(y -> y .* s),            # fixed output rescale
     # )
 
+    # Output layer zero-initialised, so g ≡ 0 at θ0:
+    # every seed starts from the pure mechanistic model and g grows only as the
+    # data demands. (Glorot on hidden layers, zeros on final weights + biases —
+    # Philipps et al., npj Syst Biol Appl 11:101, 2025.)
+
     g_builder = () -> Lux.Chain(
         Lux.WrappedFunction(x -> (x .- xmean) ./ xstd),
         Lux.Dense(N_STATES, 16, tanh),
         Lux.Dense(16, 16, tanh),
-        Lux.Dense(16, N_G, softplus),
+        Lux.Dense(16, N_G, x -> softplus(x - 3f0);   # softplus(0) ≈ log(2)
+                  init_weight = Lux.zeros32, init_bias = Lux.zeros32),
     )
-
+    
+    # Penalise ALL of θ, mean-normalised: same footing as the mean-squared data
+    # term, and no dependence on layer indexing.
     reg = λ == 0 ? (_ -> 0f0) :
-    θ -> λ * (sum(abs2, θ.layer_2) + sum(abs2, θ.layer_3))  
-
+        θ -> λ * sum(abs2, θ) / length(θ)
+    
     r1 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-2),
                  maxiters = 1000, sensealg = SENSEALG,
