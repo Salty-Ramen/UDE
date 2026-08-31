@@ -79,6 +79,20 @@ function fit_and_eval(data; seed::Int = 5, λ::Real = 0)
     xmean = Float32.(vec(mean(data.Y_train; dims = 2)))
     xstd  = Float32.(vec(max.(std(data.Y_train; dims = 2), 1f-6)))
 
+    # Channel scales from KNOWN grey params: additive channels g2,g3 ~ decay·state-scale;
+    # g1 is a per-capita rate ~ O(1), NOT a state magnitude — do NOT use xstd there.
+    s = Float32[1,                                   # g1: rate on V, O(1)
+                ode_params.d_ifn * xstd[2],          # g2 ~ d_ifn · IFN-scale
+                ode_params.d_m   * xstd[3]]          # g3 ~ d_m   · M-scale
+
+    # g_builder = () -> Lux.Chain(
+    #     Lux.WrappedFunction(x -> (x .- xmean) ./ xstd),
+    #     Lux.Dense(N_STATES, 16, tanh),
+    #     Lux.Dense(16, 16, tanh),
+    #     Lux.Dense(16, N_G, softplus),
+    #     Lux.WrappedFunction(y -> y .* s),            # fixed output rescale
+    # )
+
     g_builder = () -> Lux.Chain(
         Lux.WrappedFunction(x -> (x .- xmean) ./ xstd),
         Lux.Dense(N_STATES, 16, tanh),
@@ -86,15 +100,25 @@ function fit_and_eval(data; seed::Int = 5, λ::Real = 0)
         Lux.Dense(16, N_G, softplus),
     )
 
+    reg = λ == 0 ? (_ -> 0f0) :
+    θ -> λ * (sum(abs2, θ.layer_2) + sum(abs2, θ.layer_3))  
+
     r1 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-2),
-                 maxiters = 1000, sensealg = SENSEALG, callback = _silent, λ = λ)
+                 maxiters = 1000, sensealg = SENSEALG,
+                 callback = _silent,
+                 reg = reg)
     r2 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-3),
-                 maxiters = 3000, θ_init = r1.θ, sensealg = SENSEALG, callback = _silent, λ = λ)
+                 maxiters = 3000, θ_init = r1.θ, sensealg = SENSEALG,
+                 callback = _silent,
+                 reg = reg)
     r3 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimJL.BFGS(initial_stepnorm = 1f-2),
-                 maxiters = 400, θ_init = r2.θ, sensealg = SENSEALG, callback = _silent, λ = λ)
+                 # BFGS can autoterminate; maxiters is just for an upper bound
+                 maxiters = 1000, θ_init = r2.θ, sensealg = SENSEALG,
+                 callback = _silent,
+                 reg = reg)
 
     ev = evaluate(r3.contract, data)
     return (rel_l2_state   = ev.rel_l2_state,
@@ -102,5 +126,6 @@ function fit_and_eval(data; seed::Int = 5, λ::Real = 0)
             n_params       = ev.n_params,
             final_loss     = Float32(r3.loss(r3.θ, nothing)),
             contract       = r3.contract,
-            θ              = r3.θ)
+            θ              = r3.θ,
+            retcode        = r3.retcode)
 end

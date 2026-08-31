@@ -45,6 +45,7 @@ function run_cell(c)
         "theta"      => Float32.(ComponentArrays.getdata(r.θ)),     # raw; axes regenerable from (config,seed)
         "X_sr" => X_sr, "g_sr" => g_sr, "f_sr" => f_sr, "tg" => TG,
         "error" => "",
+        "retcode"    => string(r.retcode)
     )
 end
 
@@ -74,7 +75,7 @@ function run_fit_sweep(configs, sweep_dir; force::Bool = false,
         if !force && isfile(path)
             @info "skip (cached)" shard i n file = basename(path); continue
         end
-        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"]
+        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"] regularization = c["lambda"]
         local payload
         t = @elapsed payload = try
             run_cell(c)
