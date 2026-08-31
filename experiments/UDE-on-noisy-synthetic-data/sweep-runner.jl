@@ -32,7 +32,14 @@ function run_cell(c)
                          mice_per_timepoint = c["mice_per_timepoint"],
                          noise_frac         = c["noise_frac"],
                          seed               = c["seed"])
-    r = fit_and_eval(data; seed = c["seed"], λ = get(c, "lambda", 0.0))
+    # λ keys stay optional: the other ablations' grids don't set them, and the
+    # zero NamedTuple is fit_and_eval's unregularised default. Float32 so the
+    # loss stays Float32 end-to-end (config values arrive as Float64).
+    r = fit_and_eval(data; seed = c["seed"],
+                     λ = (w    = Float32(get(c, "lambda_w",    0f0)),
+                          jac  = Float32(get(c, "lambda_jac",  0f0)),
+                          curv = Float32(get(c, "lambda_curv", 0f0))))
+    
     X_sr = Float32.(r.contract.predict_state_raw(TG))   # 3×200 predicted states
     g_sr = Float32.(r.contract.predict_g_raw(TG))       # 3×200 learned g
     f_sr = Float32.(true_g(Float64.(X_sr)))             # 3×200 true g on those states
@@ -75,7 +82,7 @@ function run_fit_sweep(configs, sweep_dir; force::Bool = false,
         if !force && isfile(path)
             @info "skip (cached)" shard i n file = basename(path); continue
         end
-        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"] regularization = c["lambda"]
+        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"] λ = (get(c, "lambda_w", 0f0), get(c, "lambda_jac", 0f0), get(c, "lambda_curv", 0f0))
         local payload
         t = @elapsed payload = try
             run_cell(c)
