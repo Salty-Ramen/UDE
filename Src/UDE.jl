@@ -85,7 +85,8 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                  sensealg         = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)),
                  abstol::Float32  = 1f-6,
                  reltol::Float32  = 1f-6,
-                 reg              = _ -> 0f0,
+                 reg              = (_, X_pen) -> 0f0,
+                 t_pen            = nothing,
                  θ_init           = nothing)
 
     rng = MersenneTwister(seed)
@@ -112,8 +113,14 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
     # adjoint only ever sees unique saveat times.
     t_obs        = vec(data.t_train)
     t_unique     = sort(unique(t_obs))
-    col_of_obs   = [searchsortedfirst(t_unique, t) for t in t_obs]   # length Nobs
-    t_unique_row = permutedims(t_unique)
+    # Penalty times are unioned into saveat, so ONE solve serves both the data
+    # term and the roughness penalty. t_pen is uniform, so the columns pulled out
+    # by col_of_pen are uniformly spaced in time (t_all itself is not).
+    t_pen_v      = t_pen === nothing ? Float32[] : Float32.(vec(t_pen))
+    t_all        = sort(unique(vcat(t_unique, t_pen_v)))
+    col_of_obs   = [searchsortedfirst(t_all, t) for t in t_obs]
+    col_of_pen   = [searchsortedfirst(t_all, t) for t in t_pen_v]
+    t_all_row    = permutedims(t_all)
 
     predict(θ, t_grid) = Array(solve(remake(prob; p = θ), solver;
                                      saveat = vec(t_grid),
@@ -121,12 +128,12 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                                      sensealg = sensealg))
 
     function loss(θ, _)
-        sol = predict(θ, t_unique_row)          # n_states × n_unique
-        Ŷ   = sol[:, col_of_obs]                # n_states × Nobs  (scattered back)
+        sol = predict(θ, t_all_row)             # n_states × length(t_all)
+        Ŷ   = sol[:, col_of_obs]                # n_states × Nobs
         data_term = Statistics.mean(abs2, (Ŷ .- data.Y_train) ./ σ_state)
-        return data_term + reg(θ)
+        return data_term + reg(θ, sol[:, col_of_pen])
     end
-    
+   
 
     optf     = Optimization.OptimizationFunction(loss, Optimization.AutoZygote())
     prob_opt = Optimization.OptimizationProblem(optf, θ0)
