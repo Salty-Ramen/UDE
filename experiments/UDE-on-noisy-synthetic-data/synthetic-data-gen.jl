@@ -45,17 +45,17 @@ function virus_ifn_rhs!(du, u, p, t)
     return nothing
 end
 
-# True missing terms (the grey-box split) evaluated on a 3×N state matrix.
-# On the true (positive) trajectory V^n is well defined; on predicted states with
-# a stray V<0 the non-integer power yields NaN, which downstream finite() guards.
 function true_g(X, p = TRUE_PARAMS)
     V, IFN, M = X[1, :], X[2, :], X[3, :]
+    # V<0 never happens on the true trajectory, but does on PREDICTED states from
+    # a solver undershoot near V→0, where V^n (non-integer n) throws DomainError
+    # rather than returning NaN. Clamp: the V→0 limit of the Hill term is 0.
+    Vn = max.(V, zero(eltype(V))) .^ p.n
     g1 = p.r_v_ifn .* IFN .+ p.r_v_M .* M
-    g2 = (p.k1 .* V .^ p.n) ./ (p.k2 .+ V .^ p.n) .+ p.r_ifn_M .* M
+    g2 = (p.k1 .* Vn) ./ (p.k2 .+ Vn) .+ p.r_ifn_M .* M
     g3 = p.r_M_ifn .* IFN
-    permutedims(hcat(g1, g2, g3))          # 3 × N
+    permutedims(hcat(g1, g2, g3))
 end
-
 # Integrate the true (oracle) model and sample the CLEAN states at `saveat`.
 # Float64, tight tol; returns 3 × length(saveat).
 function solve_true(saveat)
