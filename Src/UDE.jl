@@ -26,16 +26,22 @@ Fixed choices / notes:
     later (the fixed/prior/fitted ablation) means wrapping θ as
     ComponentArray(gMLP = …, ode = …) and reading ode from p inside the RHS;
     none of the rest changes.
-  - Positivity is NOT enforced for PK (G is structurally non-negative; small-init
-    g keeps B sane). If a future system needs it, prefer log-state integration
-    or `isoutofdomain` over an in-RHS `max`/`clamp` — both keep the comparison
-    out of the differentiated RHS, so `ReverseDiffVJP(true)` stays correct.
-  - `sensealg` defaults to QuadratureAdjoint(ReverseDiffVJP(true)): fast compiled
-    tape, valid because the RHS is branch-free (pure arithmetic + tanh). If you
-    add value- or time-dependent branching to the RHS (clamps, ReLU, dosing
-    switches), drop the `true` or switch to ZygoteVJP/EnzymeVJP.
-  - Single optimizer per call; pass `θ_init` to warm-start (e.g. Adam → LBFGS),
-    composing in the experiment rather than baking a multi-phase wrapper.
+  - Positivity is NOT enforced. On the virus/IFN/M system V=0 is invariant under
+    the true flow (dV = V·(…)), so the exact solution cannot cross zero, but the
+    numerical one can undershoot to ~-1e-8 as V decays, and `abstol` permits it.
+    Nothing in the RHS or the loss breaks there; the exposure is downstream, where
+    a non-integer power of a state throws (see the V-clamp in true_g). If a future
+    system needs hard positivity, prefer log-state integration or `isoutofdomain`
+    over an in-RHS `max`/`clamp` — both keep the comparison out of the
+    differentiated RHS, so `ReverseDiffVJP(true)` stays correct.
+  - `sensealg` defaults to QuadratureAdjoint(ReverseDiffVJP(true)). The `true`
+    (compiled tape) is valid only because the RHS is branch-free: the grey-box
+    arithmetic plus tanh and softplus, all smooth, no value- or time-dependent
+    control flow. Adding a clamp, ReLU, or dosing switch invalidates the tape —
+    drop the `true` or switch to ZygoteVJP/EnzymeVJP. Note the experiments
+    override this default: UDE-fit.jl passes InterpolatingAdjoint(ReverseDiffVJP
+    (true)) because QuadratureAdjoint's QuadGK returns NaN when a BFGS probe
+    drives the solve to the Float32 dt-floor.
 -------------------------------------------------------------------------------=#
 
 using Lux
@@ -60,8 +66,25 @@ function ude_print_callback(state, l)
     return false
 end
 
+# The per-state scale the data term divides by. Shared with noise_floor so the
+# floor and the misfit are on one scale — they are comparable only if identical.
+state_scale(Y) = Float32.(vec(max.(std(Y; dims = 2), 1f-6)))
+
 """
-    fit_ude(data, architecture, ode_params, y0, g_builder; kwargs...) -> NamedTuple
+    fit_ude(data, architecture, ode_params, y0, g_builder;
+                 seed::Int        = 1,
+                 opt              = OptimizationOptimisers.Adam(1f-2),
+                 maxiters::Int    = 1000,
+                 callback         = ude_print_callback,
+                 solver           = AutoTsit5(Rosenbrock23()),
+                 sensealg         = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)),
+                 abstol::Float32  = 1f-6,
+                 reltol::Float32  = 1f-6,
+                 stop_below::Float32 = 0f0,
+                 stop_every::Int  = 25,
+                 reg              = (_, X_pen) -> 0f0,
+                 t_pen            = nothing,
+                 θ_init           = nothing)
 
 Fit a UDE on `data` (needs `t_train` 1×Ntrain, `Y_train` n_states×Ntrain,
 `t_span` length-2). `g_builder()` constructs the missing-term Lux network
@@ -85,6 +108,8 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                  sensealg         = QuadratureAdjoint(autojacvec = ReverseDiffVJP(true)),
                  abstol::Float32  = 1f-6,
                  reltol::Float32  = 1f-6,
+                 stop_below::Float32 = 0f0,
+                 stop_every::Int  = 25,
                  reg              = (_, X_pen) -> 0f0,
                  t_pen            = nothing,
                  θ_init           = nothing)
@@ -95,7 +120,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
     θ0 = θ_init === nothing ? ComponentArray(ps_g) : θ_init
 
     # Per-state scale for the data loss (so a large-magnitude state can't dominate).
-    σ_state = Float32.(vec(max.(std(data.Y_train; dims = 2), 1f-6)))
+    σ_state = state_scale(data.Y_train)
 
     tspan = (Float32(data.t_span[1]), Float32(data.t_span[2]))
 
@@ -127,17 +152,43 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                                      abstol = abstol, reltol = reltol,
                                      sensealg = sensealg))
 
+    # ONE definition of the data term. `loss` reuses the solve it already needs
+    # for the penalty; `data_loss` is standalone, for the discrepancy check and
+    # for reporting (the objective is NOT comparable across λ — it carries reg).
+    _data_term(sol) = Statistics.mean(abs2,
+                          (sol[:, col_of_obs] .- data.Y_train) ./ σ_state)
+
     function loss(θ, _)
-        sol = predict(θ, t_all_row)             # n_states × length(t_all)
-        Ŷ   = sol[:, col_of_obs]                # n_states × Nobs
-        data_term = Statistics.mean(abs2, (Ŷ .- data.Y_train) ./ σ_state)
-        return data_term + reg(θ, sol[:, col_of_pen])
+        sol = predict(θ, t_all_row)
+        return _data_term(sol) + reg(θ, sol[:, col_of_pen])
     end
-   
+
+    data_loss(θ) = _data_term(predict(θ, t_all_row))
+
+    # Discrepancy stop (Morozov): halt when the DATA term alone reaches the noise
+    # floor. state.u is the accepted iterate — the callback fires per accepted
+    # iteration, not per line-search probe — so this never stops on a rejected
+    # point. Costs one forward solve per check. stop_below = 0 disables.
+    # NB a callback halt returns retcode Failure; `stopped` is the real signal.
+    stop_iter = Ref(0)
+    function _cb(state, l)
+        callback(state, l) && return true
+        if stop_below > 0 && state.iter % stop_every == 0 &&
+           data_loss(state.u) <= stop_below
+            stop_iter[] = state.iter
+            return true
+        end
+        return false
+    end
+
+    # Fail at θ0 rather than several thousand iterations into a NaN. Catches an
+    # empty penalty grid (t_pen omitted while reg penalises), NaNs in Y_train,
+    # and a warm-start θ that no longer solves.
+    @assert isfinite(loss(θ0, nothing)) "loss at θ0 is not finite. heck t_pen vs reg, and data for NaNs"
 
     optf     = Optimization.OptimizationFunction(loss, Optimization.AutoZygote())
     prob_opt = Optimization.OptimizationProblem(optf, θ0)
-    res      = Optimization.solve(prob_opt, opt; maxiters = maxiters, callback = callback)
+    res      = Optimization.solve(prob_opt, opt; maxiters = maxiters, callback = _cb)
     θ★      = res.u
 
     predict_state_raw(t_grid) = predict(θ★, t_grid)
@@ -150,5 +201,9 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
             θ       = θ★,
             predict = predict,
             loss    = loss,
-            retcode = res.retcode)
+            retcode = res.retcode,
+            stats   = res.stats,
+            stopped   = stop_iter[] > 0,
+            stop_iter = stop_iter[],
+            data_loss = data_loss)
 end

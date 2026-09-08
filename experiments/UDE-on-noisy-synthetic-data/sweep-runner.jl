@@ -17,6 +17,8 @@ using DrWatson                     # savename, wsave (JLD2 under the hood)
 using LinearAlgebra                # BLAS
 include(joinpath(@__DIR__, "UDE-fit.jl"))   # fit_and_eval, generate_data, true_g, ComponentArrays
 
+using Statistics
+
 # One BLAS thread per process — N heavy processes each spinning BLAS threads
 # would oversubscribe cores; each fit is ~one core (tiny NN, serial ODE solve).
 BLAS.set_num_threads(1)
@@ -35,10 +37,13 @@ function run_cell(c)
     # λ keys stay optional: the other ablations' grids don't set them, and the
     # zero NamedTuple is fit_and_eval's unregularised default. Float32 so the
     # loss stays Float32 end-to-end (config values arrive as Float64).
-    r = fit_and_eval(data; seed = c["seed"],
+
+    r = fit_and_eval(data; seed = get(c, "init_seed", c["seed"]),
+                     output_rescale = get(c, "output_rescale", true),
+                     stop_kappa     = Float32(get(c, "stop_kappa", 0f0)),
                      λ = (w    = Float32(get(c, "lambda_w",    0f0)),
-                          jac  = Float32(get(c, "lambda_jac",  0f0)),
-                          curv = Float32(get(c, "lambda_curv", 0f0))))
+                          dt   = Float32(get(c, "lambda_dt",   0f0)),
+                          dtt  = Float32(get(c, "lambda_dtt",  0f0))))
     
     X_sr = Float32.(r.contract.predict_state_raw(TG))   # 3×200 predicted states
     g_sr = Float32.(r.contract.predict_g_raw(TG))       # 3×200 learned g
@@ -50,9 +55,13 @@ function run_cell(c)
         "rel_l2_gV"  => r.rel_l2_missing[1], "rel_l2_gIFN" => r.rel_l2_missing[2], "rel_l2_gM" => r.rel_l2_missing[3],
         "n_params"   => r.n_params,          "final_loss"  => r.final_loss,
         "theta"      => Float32.(ComponentArrays.getdata(r.θ)),     # raw; axes regenerable from (config,seed)
-        "X_sr" => X_sr, "g_sr" => g_sr, "f_sr" => f_sr, "tg" => TG,
-        "error" => "",
-        "retcode"    => string(r.retcode)
+        "X_sr"       => X_sr, "g_sr" => g_sr, "f_sr" => f_sr, "tg" => TG,
+        "error"      => "",
+        "retcode"    => string(r.retcode),
+        "data_loss"  => r.data_loss, "noise_floor" => r.noise_floor,
+        "loss_ratio" => r.noise_floor > 0 ? r.data_loss / r.noise_floor : NaN32,
+        "stopped"    => r.stopped, "stop_phase" => r.stop_phase,
+        "stop_iter"  => r.stop_iter,
     )
 end
 
@@ -67,8 +76,13 @@ function error_payload(c, err)
         "X_sr" => zeros(Float32, 3, 0), "g_sr" => zeros(Float32, 3, 0),
         "f_sr" => zeros(Float32, 3, 0), "tg" => TG,
         "error" => sprint(showerror, err),
+        "data_loss" => NaN32, "noise_floor" => NaN32, "loss_ratio" => NaN32,
+        "stopped" => false, "stop_phase" => -1, "stop_iter" => -1,
+        "bfgs_iters" => -1, "bfgs_fevals" => -1,
+        "retcode" => "error",
     )
 end
+
 
 function run_fit_sweep(configs, sweep_dir; force::Bool = false,
                        shard::Int = 1, nshards::Int = 1)
@@ -95,7 +109,9 @@ function run_fit_sweep(configs, sweep_dir; force::Bool = false,
         tmp = tempname(sweep_dir) * ".jld2"
         wsave(tmp, payload)
         mv(tmp, path; force = true)
-        @info "done" shard i n minutes = round(t / 60; digits = 1) rel_l2_state = (payload["rel_l2_V"], payload["rel_l2_IFN"], payload["rel_l2_M"]) file = basename(path)
+
+        @info "done" shard i n minutes = round(t / 60; digits = 1) rel_l2_state = (payload["rel_l2_V"], payload["rel_l2_IFN"], payload["rel_l2_M"]) ratio = payload["loss_ratio"] bfgs = payload["bfgs_iters"] retcode = payload["retcode"] file = basename(path)
+
     end
     @info "shard complete" shard nshards dir = sweep_dir
 end
