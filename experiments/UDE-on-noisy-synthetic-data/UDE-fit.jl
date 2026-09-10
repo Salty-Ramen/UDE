@@ -104,7 +104,7 @@ const SENSEALG = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
 
 _silent(state, l) = false   # no per-iter printing during a sweep
 """
-    fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, jac = 0f0, curv = 0f0),
+    fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
                       output_rescale::Bool = true, stop_kappa = 0f0)
 
 Run the config-E schedule (Adam 1e-2 → Adam 1e-3 → BFGS, warm-started) on `data`,
@@ -133,7 +133,7 @@ Returns:
   retcode        :: BFGS phase return code ("Success" / "MaxIters" / …)
   bfgs_iters, bfgs_fevals :: Int      phase-3 accepted iterations / f evaluations
 """
-function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, jac = 0f0, curv = 0f0),
+function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
                       output_rescale::Bool = true, stop_kappa = 0f0)
 
     xmean = Float32.(vec(mean(data.Y_train; dims = 2)))
@@ -180,7 +180,7 @@ function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, jac = 0f0, curv = 0f0)
     # Ż = Float32[i == (c - 1) ÷ M + 1 for i in 1:N_STATES, c in 1:N_STATES*M]
     
     wd(θ) = λ.w * sum(abs2, θ) / length(θ)
-    use_shape = !(λ.jac == 0 && λ.curv == 0)
+    use_shape = !(λ.dt == 0 && λ.dtt == 0)
     reg = if λ.w == 0 && !use_shape
         (θ, _) -> 0f0
     elseif !use_shape
@@ -189,7 +189,7 @@ function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, jac = 0f0, curv = 0f0)
         g_net = g_builder()
         g_st  = last(Lux.setup(MersenneTwister(0), g_net))   # st only; θ comes from the optimizer
         (θ, X_pen) -> let (p2, p3) = g_time_penalties(g_net, g_st, θ, X_pen, s)
-            wd(θ) + λ.jac * p2 + λ.curv * p3
+            wd(θ) + λ.dt * p2 + λ.dtt * p3
         end
     end
 

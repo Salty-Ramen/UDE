@@ -58,6 +58,7 @@ function run_cell(c)
         "X_sr"       => X_sr, "g_sr" => g_sr, "f_sr" => f_sr, "tg" => TG,
         "error"      => "",
         "retcode"    => string(r.retcode),
+        "bfgs_iters" => r.bfgs_iters, "bfgs_fevals" => r.bfgs_fevals,
         "data_loss"  => r.data_loss, "noise_floor" => r.noise_floor,
         "loss_ratio" => r.noise_floor > 0 ? r.data_loss / r.noise_floor : NaN32,
         "stopped"    => r.stopped, "stop_phase" => r.stop_phase,
@@ -96,7 +97,7 @@ function run_fit_sweep(configs, sweep_dir; force::Bool = false,
         if !force && isfile(path)
             @info "skip (cached)" shard i n file = basename(path); continue
         end
-        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"] λ = (get(c, "lambda_w", 0f0), get(c, "lambda_jac", 0f0), get(c, "lambda_curv", 0f0))
+        @info "fit" shard i n T = c["timepoints"] m = c["mice_per_timepoint"] noise = c["noise_frac"] seed = c["seed"] λ = (get(c, "lambda_w", 0f0), get(c, "lambda_dt", 0f0), get(c, "lambda_dtt", 0f0))
         local payload
         t = @elapsed payload = try
             run_cell(c)
