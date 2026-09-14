@@ -29,7 +29,7 @@
 #   end
 #
 # Run — interactive:
-#   include("reg-sweep.jl"); run_fit_sweep(CONFIGS, SWEEP_DIR)
+#   include("regularization-sweep.jl"); run_fit_sweep(CONFIGS, SWEEP_DIR)
 #   sweep_status(CONFIGS, SWEEP_DIR)
 #   # pilot the pilot — filter, don't edit:
 #   run_fit_sweep(filter(c -> c["seed"] == 1, CONFIGS), SWEEP_DIR)
@@ -49,10 +49,11 @@ const λ★ = 2.7341519f-5          # ← REPLACE with τ/P3_true from the ancho
 #    duplicates. The clean-data control lives in the earlier sweeps.
 const ALLOCATIONS = [(20, 6)]
 const NOISE       = [0, 0.20]
-const SEEDS       = 1:3
-const LAM_W       = [0.0, 0.1, 0.01, 0.001]
+const DATA_SEED   = 1
+const INIT_SEEDS  = 1:3
+const LAM_W       = [0.0, 0.001, 0.01, 0.1, 1.0, 10.0]
 const LAM_DT      = [0.0]
-const LAM_DTT     = [0.0] # , 0.1 * λ★, λ★, 10*λ★]
+const LAM_DTT     = [0.0 , 0.1 * λ★, λ★, 10*λ★]
 const STOP_KAPPA  = [0.0, 1.0]
 const OUT_RESCALE = [true]        # stage 2; flip to [true,false] for the scaler arm
 const ERR_MODEL   = ["spread", "prop"]
@@ -66,20 +67,23 @@ const ERR_MODEL   = ["spread", "prop"]
 # declares ν unestimable), so stop = κ·τ = 0 and the discrepancy stop is off for
 # BOTH κ. κ=1 there is a byte-identical rerun of κ=0 under a different filename.
 const CONFIGS = [Dict("timepoints" => T, "mice_per_timepoint" => m,
-                      "noise_frac" => ν, "seed" => s,
+                      "noise_frac" => ν, "seed" => DATA_SEED, "init_seed" => is,
                       "lambda_w" => λw, "lambda_dt" => λd, "lambda_dtt" => λc,
                       "stop_kappa" => κ, "output_rescale" => orc,
                       "err_model" => em)
                  for (T, mrange) in ALLOCATIONS for m in mrange
-                 for ν in NOISE for s in SEEDS
+                 for ν in NOISE for is in INIT_SEEDS
                  for λw in LAM_W for λd in LAM_DT for λc in LAM_DTT
                  for κ in STOP_KAPPA for orc in OUT_RESCALE
                  for em in ERR_MODEL
                  if !(ν == 0 && κ != 0)]
 
+# const SWEEP_DIR = projectdir("experiments", "UDE-on-noisy-synthetic-data",
+#                              "Ablating-on-regularization", "Results",
+#                              "sweep-stop-vs-dtt-errmodel")
 const SWEEP_DIR = projectdir("experiments", "UDE-on-noisy-synthetic-data",
                              "Ablating-on-regularization", "Results",
-                             "sweep-stop-vs-dtt-errmodel")
+                             "sweep-errmodel-pinned-data")
 
 @info "reg fit-pass plan" n_cells = length(CONFIGS) λ_star = λ★ dir = SWEEP_DIR
 
