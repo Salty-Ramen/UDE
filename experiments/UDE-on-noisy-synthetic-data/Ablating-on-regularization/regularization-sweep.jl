@@ -61,6 +61,10 @@ const ERR_MODEL   = ["spread", "prop"]
 # savename and in the payload. output_rescale and stop_kappa are in here for
 # exactly that reason — a kwarg-only switch collides on filename with its own
 # other setting.
+# Guard: at ν=0 the noise floor is 0 under both error models (spread measures
+# replicate variance, which is exactly 0 for bit-identical replicates; prop
+# declares ν unestimable), so stop = κ·τ = 0 and the discrepancy stop is off for
+# BOTH κ. κ=1 there is a byte-identical rerun of κ=0 under a different filename.
 const CONFIGS = [Dict("timepoints" => T, "mice_per_timepoint" => m,
                       "noise_frac" => ν, "seed" => s,
                       "lambda_w" => λw, "lambda_dt" => λd, "lambda_dtt" => λc,
@@ -70,7 +74,8 @@ const CONFIGS = [Dict("timepoints" => T, "mice_per_timepoint" => m,
                  for ν in NOISE for s in SEEDS
                  for λw in LAM_W for λd in LAM_DT for λc in LAM_DTT
                  for κ in STOP_KAPPA for orc in OUT_RESCALE
-                 for em in ERR_MODEL]
+                 for em in ERR_MODEL
+                 if !(ν == 0 && κ != 0)]
 
 const SWEEP_DIR = projectdir("experiments", "UDE-on-noisy-synthetic-data",
                              "Ablating-on-regularization", "Results",
