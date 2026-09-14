@@ -64,6 +64,71 @@ function noise_floor(data)
 end
 
 """
+    err_weights(data, model) -> (w, floor)
+
+Observation weights w = 1/σ (0 = masked) paired with the value fit_ude's data
+term reaches at the TRUE states, ON THE SAME SCALE as w. The pair must travel
+together: scaling w by c scales the data term by c², so w from one model with a
+floor from another makes the discrepancy stop fire in the wrong place silently.
+
+"spread" — w_i = 1/state_scale(Y_train)[i], one weight per state (fit_ude's
+    historical default; floor from `noise_floor`, which divides replicate
+    variance by that same state_scale). Matched empirically: it assumes nothing
+    about the SHAPE of the noise, only measures its size in these units.
+
+"prop"   — matches the generator's y = x(1 + ν·ε): σ_ij = ν̂_i · ȳ_i(t_k), one
+    pooled CV per state times the REPLICATE MEAN at that observation's timepoint.
+    Not the prediction — ŷ in the denominator is asymmetric and blows up as
+    ŷ→0. floor = 1 by construction, since each term is then (error ÷ its own σ)²,
+    which averages to 1 when the model is right.
+
+    ν not estimable (m = 1, or noise_frac = 0 so replicates are bit-identical)
+    ⇒ ν̂_i = 1 and floor = 0. Not a special case: a constant factor on the loss
+    does not move the minimiser, and since the generator uses one noise_frac for
+    all states the ν̂_i are near-equal, so dropping them fits identically. floor
+    = 0 disables the stop, the only consumer of the absolute scale.
+"""
+function err_weights(data, model::AbstractString)
+    if model == "spread"
+        return (1f0 ./ state_scale(data.Y_train), noise_floor(data))
+    end
+    model == "prop" ||
+        error("unknown err_model $(repr(model)) — want \"spread\" or \"prop\"")
+
+    Y  = data.Y_train
+    t  = vec(data.t_train)
+    n  = size(Y, 1)
+    cols = [findall(==(tv), t) for tv in unique(t)]      # replicate groups
+    T    = length(cols)
+
+    # Replicate mean per (state, timepoint), and the pooled CV² — averaged
+    # EQUALLY over timepoints, not signal-weighted, so timepoints where a state
+    # is small still count.
+
+    ȳ   = zeros(Float32, n, T)
+    acc = zeros(Float64, n)
+    cnt = zeros(Int, n)
+    for k in 1:T, i in 1:n
+        c = cols[k]
+        ȳ[i, k] = Statistics.mean(Y[i, c])
+        if length(c) >= 2 && ȳ[i, k] != 0 && !allequal(@view Y[i, c])
+            acc[i] += Statistics.var(Y[i, c]) / ȳ[i, k]^2
+            cnt[i] += 1
+        end
+    end
+    ν̂  = Float32[cnt[i] > 0 ? sqrt(acc[i] / cnt[i]) : 1f0 for i in 1:n]
+    fl = all(>(0), cnt) ? 1f0 : 0f0
+
+    W = zeros(Float32, n, size(Y, 2))
+    for k in 1:T, j in cols[k], i in 1:n
+        σ = ν̂[i] * ȳ[i, k]
+        W[i, j] = σ > 0 ? 1f0 / σ : 0f0   # ȳ=0 ⇒ mask; dividing first gives Inf*0
+    end
+    return (W, fl)
+end
+
+
+"""
     g_time_penalties(g_net, g_st, θ, X_pen, s) -> (P2, P3)
 
 Roughness of g **in time along the fitted trajectory**: mean squared first and
@@ -105,7 +170,9 @@ const SENSEALG = InterpolatingAdjoint(autojacvec = ReverseDiffVJP(true))
 _silent(state, l) = false   # no per-iter printing during a sweep
 """
     fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
-                      output_rescale::Bool = true, stop_kappa = 0f0)
+                      output_rescale::Bool = true, stop_kappa = 0f0,
+                      err_model::AbstractString = "spread")
+
 
 Run the config-E schedule (Adam 1e-2 → Adam 1e-3 → BFGS, warm-started) on `data`,
 then score the trained model against the CLEAN ground truth in `data`.
@@ -134,7 +201,8 @@ Returns:
   bfgs_iters, bfgs_fevals :: Int      phase-3 accepted iterations / f evaluations
 """
 function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
-                      output_rescale::Bool = true, stop_kappa = 0f0)
+                      output_rescale::Bool = true, stop_kappa = 0f0,
+                      err_model::AbstractString = "spread")
 
     xmean = Float32.(vec(mean(data.Y_train; dims = 2)))
     xstd  = Float32.(vec(max.(std(data.Y_train; dims = 2), 1f-6)))
@@ -195,19 +263,22 @@ function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
 
     t_pen = use_shape ? T_PEN : nothing
 
-    τ    = noise_floor(data)
+    w_obs, τ = err_weights(data, err_model)
     stop = Float32(stop_kappa) * τ    # 0 when κ=0, ν=0, or m=1 ⇒ stop disabled
+
     
     r1 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-2),
                  maxiters = 1000, sensealg = SENSEALG,
                  callback = _silent,
-                 reg = reg, t_pen = t_pen)
-        r2 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
+                 reg = reg, t_pen = t_pen,
+                 w_obs = w_obs)
+    r2 = fit_ude(data, grey_rhs, ode_params, Y0, g_builder;
                  seed = seed, opt = OptimizationOptimisers.Adam(1f-3),
                  maxiters = 3000, θ_init = r1.θ, sensealg = SENSEALG,
                  callback = _silent, reg = reg, t_pen = t_pen,
-                 stop_below = stop)
+                 stop_below = stop,
+                 w_obs = w_obs)
 
     # BFGS past the floor is exactly the descent the discrepancy principle skips.
     r3 = r2.stopped ? nothing :
@@ -215,7 +286,8 @@ function fit_and_eval(data; seed::Int = 5, λ = (w = 0f0, dt = 0f0, dtt = 0f0),
                  seed = seed, opt = OptimizationOptimJL.BFGS(initial_stepnorm = 1f-2),
                  maxiters = 1000, θ_init = r2.θ, sensealg = SENSEALG,
                  callback = _silent, reg = reg, t_pen = t_pen,
-                 stop_below = stop)
+                 stop_below = stop,
+                 w_obs = w_obs)
     rf = r3 === nothing ? r2 : r3
 
     ev = evaluate(rf.contract, data)

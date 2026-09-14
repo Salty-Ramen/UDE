@@ -48,13 +48,14 @@ const λ★ = 2.7341519f-5          # ← REPLACE with τ/P3_true from the ancho
 #    ν=0 dropped: τ=0 there, so the stop is inert and half the arms would be
 #    duplicates. The clean-data control lives in the earlier sweeps.
 const ALLOCATIONS = [(20, 6)]
-const NOISE       = [0.10, 0.20]
+const NOISE       = [0, 0.20]
 const SEEDS       = 1:3
 const LAM_W       = [0.0, 0.1, 0.01, 0.001]
 const LAM_DT      = [0.0]
-const LAM_DTT     = [0.0, 0.1 * λ★, λ★, 10*λ★]
+const LAM_DTT     = [0.0] # , 0.1 * λ★, λ★, 10*λ★]
 const STOP_KAPPA  = [0.0, 1.0]
-const OUT_RESCALE = [true, false]        # stage 2; flip to [true,false] for the scaler arm
+const OUT_RESCALE = [true]        # stage 2; flip to [true,false] for the scaler arm
+const ERR_MODEL   = ["spread", "prop"]
 
 # Every switch that changes what a cell MEANS is a config key, so it lands in
 # savename and in the payload. output_rescale and stop_kappa are in here for
@@ -63,14 +64,17 @@ const OUT_RESCALE = [true, false]        # stage 2; flip to [true,false] for the
 const CONFIGS = [Dict("timepoints" => T, "mice_per_timepoint" => m,
                       "noise_frac" => ν, "seed" => s,
                       "lambda_w" => λw, "lambda_dt" => λd, "lambda_dtt" => λc,
-                      "stop_kappa" => κ, "output_rescale" => orc)
+                      "stop_kappa" => κ, "output_rescale" => orc,
+                      "err_model" => em)
                  for (T, mrange) in ALLOCATIONS for m in mrange
                  for ν in NOISE for s in SEEDS
                  for λw in LAM_W for λd in LAM_DT for λc in LAM_DTT
-                 for κ in STOP_KAPPA for orc in OUT_RESCALE]
+                 for κ in STOP_KAPPA for orc in OUT_RESCALE
+                 for em in ERR_MODEL]
 
 const SWEEP_DIR = projectdir("experiments", "UDE-on-noisy-synthetic-data",
-                             "Ablating-on-regularization", "Results", "sweep-stop-vs-dtt")
+                             "Ablating-on-regularization", "Results",
+                             "sweep-stop-vs-dtt-errmodel")
 
 @info "reg fit-pass plan" n_cells = length(CONFIGS) λ_star = λ★ dir = SWEEP_DIR
 

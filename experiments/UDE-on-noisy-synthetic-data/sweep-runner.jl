@@ -37,14 +37,15 @@ function run_cell(c)
     # λ keys stay optional: the other ablations' grids don't set them, and the
     # zero NamedTuple is fit_and_eval's unregularised default. Float32 so the
     # loss stays Float32 end-to-end (config values arrive as Float64).
-
     r = fit_and_eval(data; seed = get(c, "init_seed", c["seed"]),
                      output_rescale = get(c, "output_rescale", true),
                      stop_kappa     = Float32(get(c, "stop_kappa", 0f0)),
+                     err_model      = get(c, "err_model", "spread"),
                      λ = (w    = Float32(get(c, "lambda_w",    0f0)),
                           dt   = Float32(get(c, "lambda_dt",   0f0)),
                           dtt  = Float32(get(c, "lambda_dtt",  0f0))))
-    
+
+
     X_sr = Float32.(r.contract.predict_state_raw(TG))   # 3×200 predicted states
     g_sr = Float32.(r.contract.predict_g_raw(TG))       # 3×200 learned g
     f_sr = Float32.(true_g(Float64.(X_sr)))             # 3×200 true g on those states

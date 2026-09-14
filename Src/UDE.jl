@@ -84,12 +84,21 @@ state_scale(Y) = Float32.(vec(max.(std(Y; dims = 2), 1f-6)))
                  stop_every::Int  = 25,
                  reg              = (_, X_pen) -> 0f0,
                  t_pen            = nothing,
+                 w_obs            = nothing,
                  θ_init           = nothing)
 
 Fit a UDE on `data` (needs `t_train` 1×Ntrain, `Y_train` n_states×Ntrain,
 `t_span` length-2). `g_builder()` constructs the missing-term Lux network
 (input = n_states, output = n_g). `ode_params` is whatever `architecture`
 expects and is held fixed.
+`w_obs` is the observation weight array w = 1/σ (0 = masked), in `Y_train`'s
+layout: a length-n_states vector broadcasts one weight per state, an
+n_states×Ntrain matrix gives one per observation. `nothing` (default) uses
+1/state_scale(Y_train), which is the per-state spread scaling this function used
+to hardcode. The data term is sum(abs2, (ŷ - y) .* w) / n_eff, where n_eff counts
+the unmasked entries. fit_ude has no other knowledge of the error model — build
+`w_obs` and its matching noise floor together upstream.
+
 
 Returns:
   contract :: (predict_state_raw, predict_g_raw, n_params)   — for eval_and_recover
@@ -112,6 +121,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
                  stop_every::Int  = 25,
                  reg              = (_, X_pen) -> 0f0,
                  t_pen            = nothing,
+                 w_obs            = nothing,
                  θ_init           = nothing)
 
     rng = MersenneTwister(seed)
@@ -119,8 +129,22 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
     ps_g, st_g = Lux.setup(rng, g_NN)
     θ0 = θ_init === nothing ? ComponentArray(ps_g) : θ_init
 
-    # Per-state scale for the data loss (so a large-magnitude state can't dominate).
-    σ_state = state_scale(data.Y_train)
+    # Observation weights, expanded ONCE to Y_train's full layout so there is a
+    # single code path and n_eff is unambiguous. A wrong shape fails here rather
+    # than broadcasting into something plausible.
+    W = let n = size(data.Y_train, 1), N = size(data.Y_train, 2)
+        w = w_obs === nothing ? 1f0 ./ state_scale(data.Y_train) : Float32.(w_obs)
+        if w isa AbstractVector
+            @assert length(w) == n "w_obs vector must be length n_states = $n, got $(length(w))"
+            repeat(w, 1, N)
+        else
+            @assert size(w) == (n, N) "w_obs matrix must be $n×$N, got $(size(w))"
+            collect(w)
+        end
+    end
+    n_eff = count(!iszero, W)
+    @assert n_eff > 0 "every observation weight is zero"
+    @assert all(isfinite, W) "w_obs has Inf/NaN. Sanitise σ BEFORE inverting (Inf*0 = NaN)"
 
     tspan = (Float32(data.t_span[1]), Float32(data.t_span[2]))
 
@@ -155,8 +179,7 @@ function fit_ude(data, architecture, ode_params, y0, g_builder;
     # ONE definition of the data term. `loss` reuses the solve it already needs
     # for the penalty; `data_loss` is standalone, for the discrepancy check and
     # for reporting (the objective is NOT comparable across λ — it carries reg).
-    _data_term(sol) = Statistics.mean(abs2,
-                          (sol[:, col_of_obs] .- data.Y_train) ./ σ_state)
+    _data_term(sol) = sum(abs2, (sol[:, col_of_obs] .- data.Y_train) .* W) / n_eff
 
     function loss(θ, _)
         sol = predict(θ, t_all_row)
