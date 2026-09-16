@@ -47,7 +47,7 @@ const λ★ = 2.7341519f-5          # ← REPLACE with τ/P3_true from the ancho
 # ── Axes. κ × λ_dtt is the factorial; everything else trimmed to 48 cells.
 #    ν=0 dropped: τ=0 there, so the stop is inert and half the arms would be
 #    duplicates. The clean-data control lives in the earlier sweeps.
-const ALLOCATIONS = [(20, 6)]
+const ALLOCATIONS = [(20, 3:6), (10, 3:6), (5, 3:6)]
 const NOISE       = [0, 0.20]
 const DATA_SEED   = 1
 const INIT_SEEDS  = 1:3
