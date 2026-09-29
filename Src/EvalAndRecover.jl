@@ -174,6 +174,7 @@ function recover_symbolic(state_samples::AbstractMatrix,
                           complexity_measure::Symbol = :nodes,
                           complexity_of_operators = nothing,
                           nested_constraints = nothing,
+                          constraints        = nothing,
                           parallelism::Symbol = :multithreading)
 
     X = Float64.(state_samples)
@@ -182,6 +183,7 @@ function recover_symbolic(state_samples::AbstractMatrix,
     opt_extra = merge(
         complexity_of_operators === nothing ? (;) : (; complexity_of_operators),
         nested_constraints      === nothing ? (;) : (; nested_constraints),
+        constraints             === nothing ? (;) : (; constraints),
     )
     options = Options(; binary_operators = binary_operators,
                         unary_operators  = unary_operators,
