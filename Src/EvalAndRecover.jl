@@ -162,6 +162,7 @@ RNG with `seed + i`. (Add `deterministic = true` to `Options` if your SR version
 supports it and you need bit-for-bit repeats; serial + seed is enough for the
 *selected equation* to be stable on clean targets.)
 """
+
 function recover_symbolic(state_samples::AbstractMatrix,
                           g_samples::AbstractMatrix;
                           binary_operators = [+, -, *],
@@ -172,23 +173,16 @@ function recover_symbolic(state_samples::AbstractMatrix,
                           variable_names   = nothing,
                           select::Symbol   = :bic,
                           complexity_measure::Symbol = :nodes,
-                          complexity_of_operators = nothing,
-                          nested_constraints = nothing,
-                          constraints        = nothing,
-                          parallelism::Symbol = :multithreading)
+                          parallelism::Symbol = :multithreading,
+                          sr_opts...)
 
     X = Float64.(state_samples)
     n = size(X, 2)
 
-    opt_extra = merge(
-        complexity_of_operators === nothing ? (;) : (; complexity_of_operators),
-        nested_constraints      === nothing ? (;) : (; nested_constraints),
-        constraints             === nothing ? (;) : (; constraints),
-    )
     options = Options(; binary_operators = binary_operators,
                         unary_operators  = unary_operators,
                         maxsize          = maxsize,
-                        opt_extra...)
+                        sr_opts...)
     
     results = map(axes(g_samples, 1)) do i
         y = Float64.(vec(g_samples[i, :]))
