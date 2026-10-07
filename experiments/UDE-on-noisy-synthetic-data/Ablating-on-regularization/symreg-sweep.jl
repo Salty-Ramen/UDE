@@ -12,25 +12,36 @@
 # targets do not transfer to a network's g. The reporting pass makes that call
 # from the persisted front.
 #
-# NOT reproducible per cell: parallelism = :multithreading. The deliverable is a
-# recovery frequency over K_SEEDS, reproducible in distribution only. Flip
-# PARALLELISM to :serial for bit-reproducible single runs.
+# PARALLELISM = :serial, so each (cell, term, sr_seed) is bit-reproducible and
+# process-level parallelism does the load balancing. :multithreading is ~3-5x
+# faster on an idle machine but not reproducible, and is pointless when the
+# machine is already oversubscribed by shards.
+#
+# CELLS = all of Q1 (worst-channel score <= its 0.25 quantile) unless
+# SR_N_CELLS thins it. Env var, not an ARG: CELLS/CONFIGS are consts built at
+# load time, and ARGS is empty under include().
 #
 # Run — interactive (the PROGRAM_FILE guard means include() does not launch):
-#   include(".../sr-sweep.jl")        # runs preflight, prints the null ladder
+#   include(".../sr-sweep.jl")           # runs preflight, prints the null ladder
 #   run_sr_sweep(CONFIGS[1:1], SR_DIR)   # smoke: one real run
 #   sr_status(CONFIGS, SR_DIR)
 #
-# Run — GNU parallel, 4 shards. Divide threads: :multithreading spawns
-# Threads.nthreads() workers PER SHARD.
-#   seq 4 | parallel -j4 julia --project -t 4 \
-#     experiments/UDE-on-noisy-synthetic-data/Ablating-on-regularization/sr-sweep.jl {} 4
+# Run — full Q1 (432 cells x 3 terms x 8 seeds = 10368 runs), 433 shards.
+# 433 is prime, so it is coprime with the 24 runs per cell and no shard gets
+# pinned to a single (term, sr_seed):
+#   seq 433 | parallel -j48 --joblog .../Results/sr-sweep/joblog-q1 \
+#     'OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 JULIA_NUM_THREADS=1 julia --project \
+#      experiments/UDE-on-noisy-synthetic-data/Ablating-on-regularization/sr-sweep.jl {} 433'
+#
+# Run — pilot on 12 cells spanning Q1 (SR_N_CELLS must be inside the quoted
+# command or exported; parallel does not forward the parent environment):
+#   SR_N_CELLS=12 julia --project .../sr-sweep.jl 1 1
 # ============================================================================
 
 using DrWatson
 @quickactivate "UDE"
 using JLD2, DataFrames, Statistics, LinearAlgebra, Printf
-using SymbolicRegression: Options
+using SymbolicRegression: Options, Node, string_tree, eval_tree_array
 include(projectdir("Src", "EvalAndRecover.jl"))   # recover_symbolic
 
 const SWEEP_DIR = projectdir("experiments", "UDE-on-noisy-synthetic-data",
@@ -43,11 +54,12 @@ const SR_DIR    = projectdir("experiments", "UDE-on-noisy-synthetic-data",
 # ── Cell selection ──────────────────────────────────────────────────────────
 # Score = WORST of the three g channels (gating: a fit is good only if all three
 # are). Gate = that score's 0.25 quantile over the filtered frame, i.e. the
-# notebook's Q1_CUT. Within Q1, N_CELLS rows evenly spaced BY RANK, so the
-# sample spans the quartile instead of collapsing onto its best few.
+# notebook's Q1_CUT. All of Q1 by default; SR_N_CELLS=n thins it to n rows
+# evenly spaced BY RANK, so a pilot spans the quartile instead of collapsing
+# onto its best few.
 const SCORE_COLS    = [:rel_l2_gV, :rel_l2_gIFN, :rel_l2_gM]
 const CELL_QUANTILE = 0.25
-const N_CELLS       = 12
+const N_CELLS_ENV   = get(ENV, "SR_N_CELLS", "")   # "" = all of Q1
 const K_SEEDS       = 8          # SR seeds per (cell, term); raise freely
 
 # Cell identity: these keys are the payload provenance AND the savename.
@@ -73,13 +85,70 @@ const SR_OPTIONS = Options(; binary_operators = BINOPS,
                              unary_operators  = Function[],
                              maxsize          = MAXSIZE, SR_OPTS...)
 
+# ── Tree persistence ────────────────────────────────────────────────────────
+# Flat encoding: one tuple per node, children referenced by index into the same
+# vector, post-order so a child's index is always below its parent's and the
+# root is last. Plain bits, so it does not depend on DynamicExpressions' struct
+# layout the way saving a Node would. `op` is a position in BINOPS, which is why
+# the payload records "binops" — that mapping is the silent-corruption path.
+# The hasproperty(:tree) unwrap mirrors _count_constants in EvalAndRecover.jl:
+# m.tree is a bare Node in some SR versions and an Expression wrapper in others.
+# If .l/.r or the l=/r= constructor are gone (arity-generic Node{T,D}), the
+# replacements are get_child(n, i) and children = (a, b); preflight catches it.
+# The degree == 1 branches are unreachable while unary_operators is empty.
+function encode_tree(tree)
+    rows = Tuple{Int,Bool,Float64,Int,Int,Int,Int}[]
+    function walk(n)
+        if n.degree == 0
+            push!(rows, (0, n.constant, n.constant ? Float64(n.val) : 0.0,
+                         n.constant ? 0 : Int(n.feature), 0, 0, 0))
+        elseif n.degree == 1
+            c = walk(n.l)
+            push!(rows, (1, false, 0.0, 0, Int(n.op), c, 0))
+        else
+            a = walk(n.l); b = walk(n.r)
+            push!(rows, (2, false, 0.0, 0, Int(n.op), a, b))
+        end
+        return length(rows)
+    end
+    walk(hasproperty(tree, :tree) ? tree.tree : tree)
+    rows
+end
+
+function decode_tree(rows, ::Type{T} = Float64) where {T}
+    nodes = Vector{Any}(undef, length(rows))
+    for (i, (deg, isc, val, feat, op, a, b)) in enumerate(rows)
+        nodes[i] = deg == 0 ? (isc ? Node{T}(; val = T(val)) :
+                                     Node{T}(; feature = feat)) :
+                   deg == 1 ? Node{T}(; op = op, l = nodes[a]) :
+                              Node{T}(; op = op, l = nodes[a], r = nodes[b])
+    end
+    nodes[end]
+end
+
+# A wrong encoding persists garbage that only surfaces months later in the
+# analysis, so every selected tree is round-tripped before it is written.
+# Printed form catches structure and constants to print precision; the value
+# comparison catches constants exactly. Both sides are bare Nodes, so
+# variable_names are irrelevant here (they are NOT, downstream — a decoded tree
+# prints x1/x2 unless string_tree is given variable_names).
+function assert_roundtrip(tree, F)
+    t  = hasproperty(tree, :tree) ? tree.tree : tree
+    rt = decode_tree(encode_tree(tree))
+    @assert string_tree(rt, SR_OPTIONS) == string_tree(t, SR_OPTIONS) "tree round-trip changed the printed expression"
+    a, oka = eval_tree_array(t,  F, SR_OPTIONS)
+    b, okb = eval_tree_array(rt, F, SR_OPTIONS)
+    @assert oka == okb && (!oka || a == b) "tree round-trip changed the values"
+    return nothing
+end
+
 # term -> (X_sr rows, variable names). Hands SR the grey-box support.
 const TERM_FEATURES = [([2, 3], ["IFN", "M"]),
                        ([1, 3], ["V", "M"]),
                        ([2],    ["IFN"])]
 
 const NULL_DEGREES = [1, 2, 3, 5]
-const NULL_ZERO    = 1e-10
+const NULL_LINEAR  = 1e-2    # deg-1 FVU below this ⇒ channel cannot discriminate
 
 # ── Load + filter ───────────────────────────────────────────────────────────
 _yes(v) = coalesce.(v, false)
@@ -100,13 +169,15 @@ const CELLS = let
     score = [maximum(Float64(r[c]) for c in SCORE_COLS) for r in eachrow(DF)]
     ord   = sortperm(score)
     q1    = ord[score[ord] .<= quantile(score, CELL_QUANTILE)]
-    @assert length(q1) >= N_CELLS "Q1 has $(length(q1)) rows, need $N_CELLS"
-    pick  = q1[round.(Int, range(1, length(q1); length = N_CELLS))]
+    n     = isempty(N_CELLS_ENV) ? length(q1) : parse(Int, N_CELLS_ENV)
+    @assert length(q1) >= n "Q1 has $(length(q1)) rows, need $n"
+    pick  = q1[round.(Int, range(1, length(q1); length = n))]
     @printf("frame %d rows, Q1 %d rows (cut %.4g), picked %d spanning %.4g–%.4g\n",
-            nrow(DF), length(q1), quantile(score, CELL_QUANTILE), N_CELLS,
+            nrow(DF), length(q1), quantile(score, CELL_QUANTILE), n,
             score[first(pick)], score[last(pick)])
     DF[pick, :]
 end
+const N_CELLS = nrow(CELLS)
 
 cellkey(c)  = Tuple(c[k] for k in CELL_KEYS)
 const ROWS  = Dict(Tuple(r[Symbol(k)] for k in CELL_KEYS) => r for r in eachrow(CELLS))
@@ -147,8 +218,8 @@ function run_sr_cell(c)
             seed = c["sr_seed"], variable_names = vnames,
             select = :score, parallelism = PARALLELISM, SR_OPTS...)
     r  = res[1]
-    # in run_sr_cell
     vy = Statistics.var(y; corrected = false)
+    assert_roundtrip(r.expression, F)
 
     front = [(s.complexity, s.mse, s.expr_string) for s in r.pareto]
     hc    = [cx for (cx, _, e) in front if occursin("hill", e)]
@@ -161,6 +232,9 @@ function run_sr_cell(c)
         "populations"     => SR_OPTIONS.populations,
         "population_size" => SR_OPTIONS.population_size,
         "pareto"          => front,          # (complexity, mse, expr) — ALL members
+        "pareto_trees"    => [encode_tree(s.expression) for s in r.pareto],
+        "sel_tree"        => encode_tree(r.expression),
+        "binops"          => string.(BINOPS),   # op indices are positions in this
         "sel_expr"        => r.expr_string,
         "sel_complexity"  => r.complexity,
         "sel_mse"         => r.mse,
@@ -186,6 +260,9 @@ function error_payload(c, err)
         "populations"     => SR_OPTIONS.populations,
         "population_size" => SR_OPTIONS.population_size,
         "pareto"          => Tuple{Int,Float64,String}[],
+        "pareto_trees"    => Vector{Tuple{Int,Bool,Float64,Int,Int,Int,Int}}[],
+        "sel_tree"        => Tuple{Int,Bool,Float64,Int,Int,Int,Int}[],
+        "binops"          => string.(BINOPS),
         "sel_expr"        => "", "sel_complexity" => -1,
         "sel_mse"         => NaN, "sel_rel_mse" => NaN, "target_var" => NaN,
         "null_degrees"    => NULL_DEGREES,
@@ -196,12 +273,21 @@ function error_payload(c, err)
     )
 end
 
-# ── Preflight: dies before any SR. Covers the two version-dependent reads
-#    (Options field names) and the two silent-corruption paths (non-finite
-#    X_sr in a "successful" fit, savename collisions).
+# ── Preflight: dies before any SR. Covers the three version-dependent reads
+#    (Options field names, the Node constructor, .l/.r) and the two
+#    silent-corruption paths (non-finite X_sr in a "successful" fit, savename
+#    collisions).
 function preflight(configs)
     @assert hasproperty(SR_OPTIONS, :populations) &&
             hasproperty(SR_OPTIONS, :population_size) "SymbolicRegression names these npopulations/npop in older versions — fix the two payload reads"
+    # Node API BEFORE any 220 s SR run: assert_roundtrip lives inside
+    # run_sr_cell, which the runner wraps in try/catch, so a broken encoder
+    # would otherwise become one error payload per run, each paid for in full.
+    let x = Node{Float64}(; feature = 1), k = Node{Float64}(; val = 2.0)
+        t = Node{Float64}(; op = findfirst(==(*), BINOPS), l = x, r = k)
+        @assert string_tree(decode_tree(encode_tree(t)), SR_OPTIONS) ==
+                string_tree(t, SR_OPTIONS) "tree encode/decode broken — check the Node constructor and .l/.r in this DynamicExpressions version"
+    end
     @assert length(unique(cellname.(configs))) == length(configs) "savename collision — raise sigdigits in cellname"
     for r in eachrow(CELLS)
         @assert size(r.X_sr) == (3, 200) && size(r.g_sr) == (3, 200) "X_sr/g_sr not 3x200"
@@ -217,8 +303,8 @@ function preflight(configs)
         F = Float64.(row.X_sr[frows, :]); y = Float64.(row.g_sr[term, :])
         v = [poly_rel_mse(F, y, d) for d in NULL_DEGREES]
         @printf("%6d | %s\n", term, join([@sprintf("%11.3e", x) for x in v]))
-        all(<(NULL_ZERO), v) &&
-            @warn "every null rung ~0: a low-degree polynomial already fits g_sr to numerical precision — SR on this term measures nothing" term
+        v[1] < NULL_LINEAR &&
+            @warn "deg-1 null leaves only $(v[1]) FVU — this channel cannot discriminate forms by loss" term
     end
     @info "sr preflight passed" runs = length(configs) cells = N_CELLS seeds = K_SEEDS threads = Threads.nthreads()
 end
