@@ -27,11 +27,8 @@ and sweep execution live in =common/=. Use =<study>/runs/= for drivers and
 aliases are gone. When replaying an old job log, insert =runs/= before the
 relocated driver's filename. Do not change its =Results/= path.
 
-Two experiment-root links remain for existing scratch notebooks only:
-=synthetic-data-gen.jl= and =sweep-runner.jl=. For new notebooks (or when
-promoting an old one), include =common/synthetic-data-gen.jl= or
-=common/sweep-runner.jl= directly. Remove these last links once no scratch
-notebook reads the old paths.
+Scratch and promoted notebooks both include =common/synthetic-data-gen.jl= or
+=common/sweep-runner.jl= directly; there are no experiment-root aliases.
 
 * From scratch to analysis
 1. Copy =templates/analysis.jl= to a new file under the repository's =tmp/=.
