@@ -1,0 +1,50 @@
+* Noisy synthetic UDE studies
+Start with the question. Paths in the table are relative to the named study.
+
+| Study | Question | Fit driver in runs/ | Fit records under Results/ |
+|-------+----------+---------------------+---------------------------|
+| Ablating-on-replicates | What changes with additional replicates? | replicate-sweep.jl | sweep/ |
+| Fixed-budget-sweep | How should a fixed sampling budget be allocated? | fixed-budget-sweep.jl | sweep/ |
+| Ablating-on-regularization | How do regularization and stopping affect recovery? | regularization-sweep.jl | sweep-errmodel-pinned-data/ |
+
+For the first two studies, see =analysis/replicate-sweep-plot.jl= and
+=analysis/sweep-plots.jl= respectively. The regularization study has a second
+stage: =runs/symreg-sweep.jl= reads the fit records and writes =Results/sr-sweep/=.
+Its =analysis/= directory is reserved for future promotion; older exploratory
+scripts have not been designated as the canonical analysis.
+
+* Running and reading
+Start Julia with =julia --project=.= from the repository root. Include a fit
+driver to inspect its grid; running it as a script starts fits. For example:
+#+begin_src julia
+include("experiments/UDE-on-noisy-synthetic-data/Fixed-budget-sweep/runs/fixed-budget-sweep.jl")
+sweep_status(CONFIGS, SWEEP_DIR)
+#+end_src
+Use a fresh session per driver. =Fixed-budget-sweep/sweep.jl= is the older
+standalone driver, not the entry point above. Shared noisy sampling, fitting,
+and sweep execution live in =common/=. Old paths for relocated scripts remain
+available as relative symlinks; use the canonical paths above for new work.
+
+* From scratch to analysis
+1. Copy =templates/analysis.jl= to a new file under the repository's =tmp/=.
+   Fill in the question, study, and exact input sweep. The setup finds the
+   enclosing Julia project; it does not assume a particular notebook depth.
+2. Read cached records from =sweep_dir=; don't include a driver to obtain data.
+   Write generated PDFs/PNGs to =figures_dir= and named tables or other derived
+   data to =summaries_dir=. Record the input configuration/seeds or filters.
+3. When the analysis is worth rerunning, move it to =<study>/analysis/= with a
+   descriptive name, rerun from a fresh session, and link it here. No existing
+   scratch notebooks are part of this migration.
+
+* Result-path migration: deferred
+=Results/= (capital R), dated archives, and their existing figures stay where
+current consumers expect them. New maintained plots write to =<study>/figures/=;
+older scratch plotting scripts retain their original behavior. No sweep data
+is copied, renamed, or added to Git as part of the layout change.
+
+If migrating later, first inventory readers (including =tmp/= notebooks) and
+back up the untracked archives. Map each existing fit or SR run to a stable
+run ID under =results/fit-sweep/= or =results/sr-sweep/=, recording its old
+path and configuration. On case-insensitive filesystems do not create
+=results/= beside =Results/=. Update readers and the template together, verify
+record counts and regenerate a representative figure, then retire old paths.
