@@ -10,8 +10,26 @@ Start with the question. Paths in the table are relative to the named study.
 For the first two studies, see =analysis/replicate-sweep-plot.jl= and
 =analysis/sweep-plots.jl= respectively. The regularization study has a second
 stage: =runs/symreg-sweep.jl= reads the fit records and writes =Results/sr-sweep/=.
-Its =analysis/= directory is reserved for future promotion; older exploratory
-scripts have not been designated as the canonical analysis.
+Its =analysis/= directory also contains two independent analyses of the fit
+records. Neither requires the symbolic-regression stage. From the repo root:
+
+#+begin_src sh
+A=experiments/UDE-on-noisy-synthetic-data/Ablating-on-regularization/analysis
+julia --project=. "$A/early-stopping-and-recovery.jl"
+julia --project=. "$A/regularization-by-sampling-design.jl"
+julia --project=. "$A/compose-recovery-and-design.jl"   # optional combined layout
+#+end_src
+
+Each question produces a same-named PDF in the study's =figures/= directory;
+composition produces =recovery-and-design-preview.pdf=. The first compares
+stopping-arm score distributions and shows recovered terms against truth in
+four pooled score quartiles (predictions sampled nearest the 81 scoring times).
+The second compares median scores across the λ grid by sampling design,
+pooling stopping arms and seeds. It does *not* measure best-quartile frequency.
+Both use =analysis/fit-population.jl=: successful proportional-error fits at
+noise fraction 0.2, scored by the maximum of the three channel relative errors.
+The inputs are the saved fit records, not a notebook session or aggregate cache.
+The composition script controls layout only; no manuscript figure number is assumed.
 
 * Running and reading
 Start Julia with =julia --project=.= from the repository root. Include a fit
