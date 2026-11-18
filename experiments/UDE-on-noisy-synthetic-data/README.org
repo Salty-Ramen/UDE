@@ -22,8 +22,16 @@ sweep_status(CONFIGS, SWEEP_DIR)
 #+end_src
 Use a fresh session per driver. =Fixed-budget-sweep/sweep.jl= is the older
 standalone driver, not the entry point above. Shared noisy sampling, fitting,
-and sweep execution live in =common/=. Old paths for relocated scripts remain
-available as relative symlinks; use the canonical paths above for new work.
+and sweep execution live in =common/=. Use =<study>/runs/= for drivers and
+=<study>/analysis/= for maintained plotting scripts; the former study-root
+aliases are gone. When replaying an old job log, insert =runs/= before the
+relocated driver's filename. Do not change its =Results/= path.
+
+Two experiment-root links remain for existing scratch notebooks only:
+=synthetic-data-gen.jl= and =sweep-runner.jl=. For new notebooks (or when
+promoting an old one), include =common/synthetic-data-gen.jl= or
+=common/sweep-runner.jl= directly. Remove these last links once no scratch
+notebook reads the old paths.
 
 * From scratch to analysis
 1. Copy =templates/analysis.jl= to a new file under the repository's =tmp/=.
