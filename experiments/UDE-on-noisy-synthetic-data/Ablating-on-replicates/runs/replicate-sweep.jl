@@ -3,7 +3,7 @@
 #
 # Fit-pass DRIVER for the replicate question: at a FIXED temporal resolution T,
 # does m=3 land within ~10% rel-L2 of the largest m tested? Total budget is NOT
-# held fixed — that IS the question. Grid-agnostic runner: ../sweep-runner.jl.
+# held fixed — that IS the question. Grid-agnostic runner: ../../common/sweep-runner.jl.
 #
 # Run — interactive:
 #   include("replicate-sweep.jl"); run_fit_sweep(CONFIGS, SWEEP_DIR)

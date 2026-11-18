@@ -35,7 +35,7 @@
 
 using DrWatson                     # savename, wsave, wload (JLD2 under the hood)
 using Statistics, Pkg, LinearAlgebra
-include(joinpath(@__DIR__, "..", "UDE-fit.jl"))   # fit_and_eval, generate_data, true_g, Y0, ComponentArrays
+include(joinpath(@__DIR__, "..", "common", "UDE-fit.jl"))   # fit_and_eval, generate_data, true_g, Y0, ComponentArrays
 
 # One BLAS thread per process. N heavy processes each spinning up BLAS threads
 # would oversubscribe cores; each fit is ~one core of work anyway (tiny NN,

@@ -15,7 +15,7 @@
 
 using DrWatson                     # savename, wsave (JLD2 under the hood)
 using LinearAlgebra                # BLAS
-include(joinpath(@__DIR__, "UDE-fit.jl"))   # fit_and_eval, generate_data, true_g, ComponentArrays
+include(joinpath(dirname(realpath(@__FILE__)), "UDE-fit.jl"))   # fit_and_eval, generate_data, true_g, ComponentArrays
 
 using Statistics
 

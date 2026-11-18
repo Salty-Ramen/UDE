@@ -28,7 +28,7 @@ using Pkg
 const SRC = joinpath(dirname(Pkg.project().path), "Src")
 include(joinpath(SRC, "UDE.jl"))
 include(joinpath(SRC, "EvalAndRecover.jl"))
-include(joinpath(@__DIR__, "synthetic-data-gen.jl"))   # generate_data, Y0, TRUE_PARAMS, true_g
+include(joinpath(dirname(realpath(@__FILE__)), "synthetic-data-gen.jl"))   # generate_data, Y0, TRUE_PARAMS, true_g
 
 const N_STATES = 3
 const N_G      = 3

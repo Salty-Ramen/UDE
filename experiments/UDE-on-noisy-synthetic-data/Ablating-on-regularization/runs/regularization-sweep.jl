@@ -16,7 +16,7 @@
 #               TRUE feature. Second order discriminates wiggle from signal
 #               ~(timescale ratio)² better.
 #   lambda_w    L² weight decay on θ. Pinned at 0 for this pilot.
-# Grid-agnostic runner: ../sweep-runner.jl.
+# Grid-agnostic runner: ../../common/sweep-runner.jl.
 #
 # λ★ anchor — run ONCE before launching, paste the result into LAM_DTT:
 #   let dd = generate_data(timepoints=20, mice_per_timepoint=6, noise_frac=0.10, seed=1)

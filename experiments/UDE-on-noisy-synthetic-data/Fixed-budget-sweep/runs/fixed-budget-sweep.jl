@@ -3,7 +3,7 @@
 #
 # Fit-pass DRIVER: fixed mouse BUDGET reallocated across timepoints. Only the
 # grid + output dir live here; the grid-agnostic runner (run_cell /
-# run_fit_sweep / sweep_status) is in ../sweep-runner.jl.
+# run_fit_sweep / sweep_status) is in ../../common/sweep-runner.jl.
 #
 # Run — interactive (does NOT run on include):
 #   include("fixed-budget-sweep.jl"); run_fit_sweep(CONFIGS, SWEEP_DIR)
