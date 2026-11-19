@@ -31,6 +31,28 @@ noise fraction 0.2, scored by the maximum of the three channel relative errors.
 The inputs are the saved fit records, not a notebook session or aggregate cache.
 The composition script controls layout only; no manuscript figure number is assumed.
 
+* Symbolic recovery: three independent questions
+From the repository root, with =A= set as above, run =julia --project=. "$A/<script>.jl"=:
+
+| Script | Unit | Question / output |
+|--------+------+-------------------|
+| sr-distillation-error | SR run | Does the selected expression approximate the network and truth on the same predicted states? Dashed line: median network-to-truth error. |
+| sr-selected-structures | SR run | Which sign-conditioned structural keys are selected most often? Top eight per channel plus the remainder. |
+| sr-search-versus-selection | fit/channel | Was the true structure present on any stored Pareto front, and was it ever selected? Fractions by within-channel network-error decile, with Wilson intervals. |
+| compose-sr-recovery | mixed | Draw all three into =figures/sr-recovery-preview.pdf= without rerunning fits or searches. |
+
+Standalone PDFs use the script basename under =figures/=. These are question-driven
+views of =tmp/test-sr-3.jl=, not exports of every exploratory cell. A front hit
+means a match on a *saved front*, not proof that the search never visited any
+other form. A cell-level hit is counted once across successful SR seeds.
+
+=analysis/sr-population.jl= joins successful =Results/sr-sweep/= runs to their
+parent =Results/sweep-errmodel-pinned-data/= fits. =Src/SRSkeleton.jl= defines
+structural equivalence. The validated =outputs/sweep-cache/= snapshots are
+built from the records on first use; existing snapshots do not check source
+freshness. After changes to either sweep, run one script with =SR_REFRESH=1=
+to rebuild both snapshots before regenerating the remaining figures.
+
 * Running and reading
 Start Julia with =julia --project=.= from the repository root. Include a fit
 driver to inspect its grid; running it as a script starts fits. For example:
