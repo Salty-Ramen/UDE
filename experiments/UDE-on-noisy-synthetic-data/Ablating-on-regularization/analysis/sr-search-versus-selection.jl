@@ -3,9 +3,8 @@ import CairoMakie as CM
 using DataFrames, Statistics
 
 "A hit means any successful seed of the same fit/channel; compare saved front versus pick."
-function draw_search_selection!(layout,runs)
-    trees = SRPopulation.truth_trees()
-    for (i,ch) in enumerate(SRPopulation.CHANNELS)
+function search_selection_cells(runs,i)
+        trees = SRPopulation.truth_trees()
         truth = SRPopulation.SRSkeleton.skeleton_info(trees[i],i).str
         memo = Dict{Any,Union{Nothing,String}}()
         key(t) = get!(memo,t) do
@@ -30,8 +29,15 @@ function draw_search_selection!(layout,runs)
             err = SRPopulation.rho(Float64.(first(d.g_sr)[i,:]), Float64.(first(d.f_sr)[i,:]))
             (; found,selected,err,seeds=nrow(d))
         end
+        @info "Unkeyable front members" term=i invalid
+        return cells
+end
+
+function draw_search_selection!(layout,runs)
+    for (i,ch) in enumerate(SRPopulation.CHANNELS)
+        cells = search_selection_cells(runs,i)
         good = filter(:err => e->isfinite(e)&&e>0,cells)
-        @info "Front audit" channel=ch cells=nrow(cells) seeds=extrema(cells.seeds) excluded=nrow(cells)-nrow(good) unkeyable_members=invalid found=sum(good.found) selected=sum(good.selected)
+        @info "Front audit" channel=ch cells=nrow(cells) seeds=extrema(cells.seeds) excluded=nrow(cells)-nrow(good) found=sum(good.found) selected=sum(good.selected)
         edges = quantile(good.err,0:0.1:1)
         good.bin = [clamp(searchsortedlast(edges,e),1,10) for e in good.err]
         g = sort(combine(groupby(good,:bin),:err=>median=>:x,:found=>sum=>:found,:selected=>sum=>:selected,nrow=>:n),:bin)
