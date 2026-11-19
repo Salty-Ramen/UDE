@@ -39,6 +39,7 @@ From the repository root, with =A= set as above, run =julia --project=. "$A/<scr
 | sr-paired-recovery-error | SR run | Main 3A: is the expression closer to truth than its own network on the same predicted states? |
 | sr-distillation-error (supplement) | SR run | Does the selected expression approximate the network and truth on the same predicted states? Dashed line: median network-to-truth error. |
 | sr-selected-structures | SR run | Which sign-conditioned structural keys are selected most often? Top eight per channel plus the remainder. |
+| sr-recovery-regression | fit/channel | Forest plot of categorical main-effect log odds ratios (95% Wald intervals) for finding truth and selecting it among finders. Reference: smallest observed factor level. Stages with fewer than 20 events or non-events are not fitted. |
 | sr-search-versus-selection | fit/channel | Was the true structure present on any stored Pareto front, and was it ever selected? Fractions by within-channel network-error decile, with Wilson intervals. |
 | compose-sr-recovery | mixed | Combine paired errors, structural frequencies and search vs selection in =figures/sr-recovery-preview.pdf= without rerunning fits or searches. |
 
