@@ -57,7 +57,7 @@ function draw_recovery_regression!(layout,runs)
             CM.errorbars!(ax,x,s.beta,1.96 .* s.se;color=colors[ci],whiskerwidth=8)
             CM.scatter!(ax,x,s.beta;color=colors[ci],markersize=9,label=ch)
         end
-        j==1 && i==1 && CM.axislegend(ax;labelsize=12)
+        j==1 && i==1 && CM.axislegend(ax;position=:lt,labelsize=12)
     end
 end
 
