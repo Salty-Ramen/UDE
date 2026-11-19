@@ -16,7 +16,8 @@ function search_selection_cells(runs,i)
             end
         end
         invalid = 0
-        cells = combine(groupby(filter(:term => ==(i),runs),SRPopulation.CELL)) do d
+        # Groups share the per-channel memo and invalid counter; fold them serially.
+        cells = combine(groupby(filter(:term => ==(i),runs),SRPopulation.CELL); threads=false) do d
             found = selected = false
             for r in eachrow(d)
                 length(r.pareto)==length(r.pareto_trees) || error("Misaligned front metadata")
