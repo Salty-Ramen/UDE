@@ -40,12 +40,12 @@ function draw_search_selection!(layout,runs)
             p = g[!,col] ./ g.n; z = 1.96
             center = (p .+ z^2 ./ (2 .* g.n)) ./ (1 .+ z^2 ./ g.n)
             half = z .* sqrt.(p .* (1 .- p) ./ g.n .+ z^2 ./ (4 .* g.n.^2)) ./ (1 .+ z^2 ./ g.n)
-            CM.errorbars!(ax,g.x,p,max.(0,p.-center.+half),max.(0,center.+half.-p);color)
-            CM.scatterlines!(ax,g.x,p;color,label)
+            CM.errorbars!(ax,g.x,p,max.(0,p.-center.+half),max.(0,center.+half.-p);color=(color,0.6),whiskerwidth=8,linewidth=1.2)
+            CM.scatterlines!(ax,g.x,p;color,label,markersize=12,linewidth=2)
         end
         CM.ylims!(ax,-0.03,1.03); i==1 && CM.axislegend(ax)
     end
 end
 if abspath(PROGRAM_FILE)==@__FILE__
-    SRPopulation.render("sr-search-versus-selection",draw_search_selection!)
+    SRPopulation.render("sr-search-versus-selection",draw_search_selection!;size=(1420,540))
 end

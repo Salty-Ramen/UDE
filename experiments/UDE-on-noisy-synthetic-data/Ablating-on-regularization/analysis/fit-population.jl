@@ -1,5 +1,6 @@
 using DataFrames
 import JLD2  # backend for reading sweep records
+include("figure-style.jl")
 using DrWatson
 using Statistics
 

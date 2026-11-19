@@ -4,7 +4,7 @@ include("regularization-by-sampling-design.jl")
 
 if abspath(PROGRAM_FILE) == @__FILE__
     fits = load_fits()
-    fig = Figure(size=(1400, 1750))
+    fig = notebook_figure(size=(1400, 1750))
     recovery = fig[1,1] = GridLayout()
     design = fig[2,1] = GridLayout()
     draw_recovery!(recovery, fits)

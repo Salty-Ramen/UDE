@@ -20,11 +20,20 @@ function draw_distillation!(layout, runs)
             push!(x,a); push!(y,b); push!(baseline,c)
         end
         @info "Error panel" channel=ch plotted=length(x) excluded=nrow(d)-length(x)
-        CM.scatter!(ax,x,y; markersize=3,color=(:steelblue,0.22),rasterize=2)
-        CM.hlines!(ax,[median(baseline)]; color=:black,linestyle=:dash,label="Median network vs truth")
+        CM.scatter!(ax,x,y; markersize=15,color=(:black,0.25),rasterize=2)
+        # Notebook overlay: median response within log-x deciles.
+        lx = log10.(x); edges = quantile(lx,0:0.1:1)
+        bx, by = Float64[], Float64[]
+        for j in 1:10
+            keep = findall(v -> edges[j] <= v <= edges[j+1], lx)
+            length(keep) < 5 && continue
+            push!(bx,10^median(lx[keep])); push!(by,median(y[keep]))
+        end
+        CM.scatterlines!(ax,bx,by;color=:firebrick,linewidth=3,markersize=9)
+        CM.hlines!(ax,[median(baseline)]; color=:black,linestyle=:dash,linewidth=1.5,label="Median network vs truth")
         i==1 && CM.axislegend(ax)
     end
 end
 if abspath(PROGRAM_FILE)==@__FILE__
-    SRPopulation.render("sr-distillation-error",draw_distillation!)
+    SRPopulation.render("sr-distillation-error",draw_distillation!;size=(1320,520))
 end

@@ -1,4 +1,5 @@
 module SRPopulation
+include("figure-style.jl")
 using DataFrames, Statistics, DrWatson
 import JLD2
 import CairoMakie as CM
@@ -66,7 +67,7 @@ function load_runs()
 end
 
 function render(name, draw, runs=load_runs(); size=(1450,480))
-    fig = CM.Figure(;size); draw(fig.layout,runs)
+    fig = notebook_figure(;size); draw(fig.layout,runs)
     path = joinpath(mkpath(joinpath(STUDY,"figures")),name*".pdf")
     CM.save(path,fig); @info "Saved" path
 end

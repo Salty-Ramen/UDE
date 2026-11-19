@@ -38,7 +38,7 @@ function draw_design!(layout, fits)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    fig = Figure(size=(1100, 850))
+    fig = notebook_figure(size=(1100, 850))
     draw_design!(fig.layout, load_fits())
     save_analysis(fig, "regularization-by-sampling-design")
 end
